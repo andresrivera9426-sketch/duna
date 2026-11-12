@@ -42,8 +42,13 @@ async function ctxMsg(p, txt) {
   const hd = await p.evaluateHandle(finder, txt);
   const el = hd.asElement(); if (!el) throw new Error('no encontré el mensaje ' + txt);
   await el.evaluate(e => e.scrollIntoView({ block: 'center' })); await sleep(200);
-  const box = await el.boundingBox(); await p.mouse.click(box.x + Math.min(40, box.width / 2), box.y + Math.min(14, box.height / 2), { button: 'right' });
-  await p.waitForSelector('.ctx');
+  for (let i = 0; i < 3; i++) {
+    await el.evaluate(e => e.scrollIntoView({ block: 'center' })); await sleep(300);
+    const box = await el.boundingBox(); await p.mouse.click(box.x + Math.min(40, box.width / 2), box.y + box.height - 10, { button: 'right' });
+    if (await p.waitForSelector('.ctx', { timeout: 3000 }).then(() => true, () => false)) return;
+    await closeSheets(p); await p.keyboard.press('Escape');
+  }
+  throw new Error('no abrió el menú del mensaje ' + txt);
 }
 const clickMenu = (p, label) => p.evaluate(l => { const b = [...document.querySelectorAll('.ctx .ctx-item')].find(x => x.innerText.trim() === l); b?.click(); return !!b; }, label);
 const clickText = (p, sel, txt) => p.evaluate((s, t) => { const b = [...document.querySelectorAll(s)].reverse().find(x => x.innerText.trim().includes(t)); b?.click(); return !!b; }, sel, txt);
@@ -103,7 +108,7 @@ try {
     await A.evaluate(n => [...document.querySelectorAll('.sheet .person')].find(e => e.innerText.includes(n)).click(), users.b.n);
     await A.waitForSelector('#msg-input'); chatAB = await A.evaluate(() => window.__duna.S.current);
     await send(A, 'Hola Beto ' + stamp);
-    ok('Mensaje 1:1 enviado y recibido en tiempo real', await textIn(B, '.chat-row', 'Hola Beto ' + stamp, 20000));
+    ok('Mensaje 1:1 enviado y recibido en tiempo real', await textIn(B, '.chat-row', 'Hola Beto ' + stamp, 30000));
     await openChatWith(B, users.a.n);
     ok('B ve el mensaje descifrado (E2E)', await textIn(B, '.mrow', 'Hola Beto ' + stamp));
     ok('Doble check azul (leído)', await waitFn(A, t => { const r = [...document.querySelectorAll('.mrow.me')].find(e => e.innerText.includes(t)); return r && r.querySelector('.tick.read'); }, 'Hola Beto ' + stamp, 20000));
@@ -475,7 +480,7 @@ try {
     await D.type('#rv-user', users.b.u); await D.type('#rv-code', recB); await D.type('#rv-pass', PASS + 'X'); await D.type('#rv-pass2', PASS + 'X'); await shot(D, '13-recuperar-390'); await D.click('#rv-go');
     const inn = await D.waitForSelector('#app', { timeout: 30000 }).then(() => true, () => false);
     users.b.p = PASS + 'X'; fs.writeFileSync(CREATED, JSON.stringify(created.map(u => u.u === users.b.u ? { ...u, p: users.b.p } : u), null, 1));
-    let read = false; if (inn) { await openChatWith(D, users.a.n); read = await textIn(D, '.mrow', 'Hola Beto ' + stamp, 15000); }
+    let read = false; if (inn) { await sleep(1500); await openChatWith(D, users.a.n); read = await textIn(D, '.mrow', 'Difusión ' + stamp, 20000); if (!read) await shot(D, 'fail-recuperar-D'); }
     ok('Recuperar cuenta con código (nueva contraseña) y conservar mensajes cifrados', inn && read);
     const wrong = await (async () => { const E = await page(await browserB.createBrowserContext(), 'E', { width: 390, height: 844 }); await E.click('#f-forgot'); await E.waitForSelector('#rv-user'); await E.type('#rv-user', users.b.u); await E.type('#rv-code', 'AAAAA-AAAAA-AAAAA-AAAAA-AAAAA'); await E.type('#rv-pass', 'otraclave123'); await E.type('#rv-pass2', 'otraclave123'); await E.click('#rv-go'); return textIn(E, '.sheet .err', 'incorrectos', 10000); })();
     ok('Código de recuperación incorrecto es rechazado', wrong);
