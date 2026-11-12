@@ -2,3 +2,11 @@
 node_modules/
 tests/out*/
 tests/out/
+
+# Secretos de la app nativa (nunca al repo)
+*.jks
+*.keystore
+signing.properties
+android/app/google-services.json
+ios/App/App/GoogleService-Info.plist
+*firebase-adminsdk*.json

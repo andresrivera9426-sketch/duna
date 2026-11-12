@@ -16,6 +16,7 @@ export async function openChat(id, fromRoute = false) {
   const c = S.chats.get(id); if (!c) return;
   if (c.type === 'community') return import('./communities.js').then(m => m.openCommunity(id));
   S.current = id; searchState = null; pinIdx = 0; nodeCache = new Map();
+  if (document.documentElement.classList.contains('native')) import('./native.js').then(n => n.clearChatNotifications(id));
   document.getElementById('app')?.classList.add('in-chat');
   if (!fromRoute && location.hash !== '#/c/' + id) history.pushState(null, '', '#/c/' + id);
   document.querySelectorAll('.chat-row').forEach(r => r.classList.toggle('active', r.dataset.chat === id));

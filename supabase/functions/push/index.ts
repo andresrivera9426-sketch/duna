@@ -1,6 +1,7 @@
 // DUNA · envío de notificaciones push (disparado por la base de datos vía pg_net)
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { sendPush } from './webpush.js';
+import { sendNative } from './native.ts';
 
 const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
 let cfg: Record<string, string> | null = null;
@@ -12,8 +13,9 @@ Deno.serve(async (req) => {
   if (!cfg?.push_secret || req.headers.get('x-duna-secret') !== cfg.push_secret) return json({ error: 'no autorizado' }, 401);
   const { kind, id } = await req.json().catch(() => ({}));
   if (!['msg', 'call'].includes(kind) || typeof id !== 'string') return json({ error: 'datos' }, 400);
+  const nativeP = sendNative(sb, cfg!, kind, id).catch((e: Error) => ({ error: String(e?.message || e) }));
   const { data: targets, error } = await sb.rpc('push_targets', { p_kind: kind, p_id: id });
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: error.message, native: await nativeP }, 500);
   const gone: number[] = []; const res: number[] = [];
   await Promise.all((targets || []).map(async (t: any) => {
     try {
@@ -22,5 +24,5 @@ Deno.serve(async (req) => {
     } catch (_e) { res.push(0); }
   }));
   if (gone.length) await sb.rpc('push_gone', { p_ids: gone });
-  return json({ sent: res.length, status: res, gone: gone.length });
+  return json({ sent: res.length, status: res, gone: gone.length, native: await nativeP });
 });

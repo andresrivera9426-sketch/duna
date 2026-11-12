@@ -10,6 +10,7 @@ import { renderCommunities } from './communities.js';
 import { renderCalls, onCallEvent, initCalls } from './calls.js';
 import { openSettings, applyTheme, cleanupOrphans } from './settings.js';
 import { cleanupMine } from './chat.js';
+import { isNative, nativeEarly, nativeStart, syncChatKeys, unregisterDevice, nativeInfo, enableNativeNotifications } from './native.js';
 
 export function avatar(p, size = 46, extra = {}) {
   const name = p?.display_name || p?.title || '?';
@@ -117,6 +118,14 @@ function renderList(listEl) {
   for (const c of chats) listEl.append(chatRow(c));
 }
 function pushBanner() {
+  if (isNative()) {
+    if (S.prefs.pushBannerOff || S._nativeNotifOk) return null;
+    if (S._nativeNotifOk === undefined) { S._nativeNotifOk = true; nativeInfo().then(i => { S._nativeNotifOk = !!(i?.notifications && (i.fcm || i.battery)); if (!S._nativeNotifOk) renderList(); }); return null; }
+    return h('div', { class: 'push-banner', id: 'push-banner' }, icon('bell', 20),
+      h('div', { class: 'grow' }, h('b', null, 'Activa las notificaciones'), h('small', null, 'Permite notificaciones y que DUNA funcione en segundo plano para recibir mensajes y llamadas con la app cerrada.')),
+      h('button', { class: 'btn primary sm', id: 'push-banner-on', onclick: async () => { await enableNativeNotifications().catch(e => toast(e.message)); savePrefs(); S._nativeNotifOk = undefined; setTimeout(renderList, 1500); } }, 'Activar'),
+      h('button', { class: 'icon-btn', 'aria-label': 'Ocultar', onclick: () => { S.prefs.pushBannerOff = true; savePrefs(); renderList(); } }, icon('x', 18)));
+  }
   const sup = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   if (!sup || S.prefs.push || S.prefs.pushBannerOff || Notification.permission === 'denied') return null;
   return h('div', { class: 'push-banner', id: 'push-banner' }, icon('bell', 20),
@@ -281,8 +290,9 @@ function notify(c, m, open) {
 
 // ===== Arranque =====
 async function boot() {
+  nativeEarly();
   applyTheme();
-  if ('serviceWorker' in navigator) {
+  if ('serviceWorker' in navigator && !isNative()) {
     const hadCtl = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js').then(reg => { document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); }); setInterval(() => reg.update().catch(() => {}), 30 * 60e3); }).catch(() => {});
     // Si se publica una versión nueva con la app abierta, se recarga sola (si está oculta) o avisa
@@ -337,6 +347,10 @@ async function start() {
   if (S._newRecovery) { const code = S._newRecovery; delete S._newRecovery; import('./account.js').then(a => a.showRecoveryCode(code, true)); }
   import('./account.js').then(a => a.syncPush()).catch(() => {});
   import('./extras.js').then(x => x.loadQuickReplies()).catch(() => {});
+  if (isNative()) {
+    nativeStart({ openChat, closeChat: () => closeChat(), resync, attachFiles: f => import('./composer.js').then(m => m.attachFiles(f)) }).catch(e => console.warn(e));
+    on('chats', debounce(() => syncChatKeys(), 3000));
+  }
 }
 function markDeliveredAll() { for (const c of S.chats.values()) if (c.unread) markDelivered(c.id); }
 async function heartbeat() { if (document.visibilityState !== 'visible') return; await sb.from('profiles').update({ last_seen: new Date().toISOString() }).eq('id', S.user.id); }
@@ -355,7 +369,7 @@ function route() {
 export async function logout() {
   if (!(await confirmDialog('¿Cerrar sesión en este dispositivo? Tus chats seguirán en tu cuenta.', 'Cerrar sesión', true))) return;
   const { kvDel } = await import('./crypto.js'); await kvDel('priv:' + S.user.id);
-  await (await import('./account.js')).disablePush().catch(() => {}); await kvDel('swcfg');
+  await (await import('./account.js')).disablePush().catch(() => {}); await kvDel('swcfg'); await unregisterDevice().catch(() => {});
   await sb.removeAllChannels(); await sb.auth.signOut(); localStorage.removeItem('duna-prefs'); location.hash = ''; location.reload();
 }
 window.addEventListener('online', () => document.body.classList.remove('offline'));

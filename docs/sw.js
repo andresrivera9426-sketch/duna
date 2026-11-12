@@ -1,5 +1,5 @@
-const V = 'duna-202611121524';
-const CORE = ['./', 'index.html', 'app.js?v=202611121524', 'styles.css?v=202611121524', 'manifest.webmanifest', 'icons/logo.svg', 'icons/icon-192.png'];
+const V = 'duna-202611121721';
+const CORE = ['./', 'index.html', 'app.js?v=202611121721', 'styles.css?v=202611121721', 'manifest.webmanifest', 'icons/logo.svg', 'icons/icon-192.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(CORE)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {
@@ -36,7 +36,15 @@ self.addEventListener('push', e => {
   let d = {}; try { d = e.data ? e.data.json() : {}; } catch { d = { title: 'DUNA', body: e.data?.text() }; }
   e.waitUntil((async () => {
     const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    if (d.t === 'msg' && wins.some(w => w.focused && w.visibilityState === 'visible')) return;
+    // Safari (iPhone/iPad/Mac) revoca el permiso si un push no muestra notificación: allí se muestra siempre (silenciosa y breve si DUNA está en pantalla)
+    const apple = /iPhone|iPad|iPod|Macintosh/.test(self.navigator.userAgent) && !/Chrome|Chromium|CriOS|Edg|Firefox|FxiOS/.test(self.navigator.userAgent);
+    if (d.t === 'msg' && wins.some(w => w.focused && w.visibilityState === 'visible')) {
+      if (!apple) return;
+      await self.registration.showNotification(d.title || 'DUNA', { body: 'Mensaje nuevo', tag: 'duna-fg', silent: true, icon: 'icons/icon-192.png' });
+      await new Promise(r => setTimeout(r, 1500));
+      (await self.registration.getNotifications({ tag: 'duna-fg' })).forEach(n => n.close());
+      return;
+    }
     const cfg = (await kv('swcfg').catch(() => null)) || {};
     if (cfg.uid && d.uid && cfg.uid !== d.uid) return;
     const opts = { icon: 'icons/icon-192.png', badge: 'icons/badge.png', data: { chat: d.chat }, tag: d.chat || 'duna', renotify: true };

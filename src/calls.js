@@ -47,7 +47,7 @@ export async function onCallEvent(p) {
     if (!S.chats.has(call.chat_id)) await refreshChat(call.chat_id);
     const c = S.chats.get(call.chat_id); if (!c || (c.muted_until && new Date(c.muted_until) > new Date() && c.type !== 'direct')) return;
     incoming = call; showIncoming(call); ring(true);
-    if (S.prefs.notif && document.hidden && Notification.permission === 'granted') navigator.serviceWorker?.ready.then(r => r.showNotification('Llamada entrante · ' + chatTitle(c), { body: call.kind === 'video' ? 'Videollamada' : 'Llamada de voz', tag: 'call-' + call.id, requireInteraction: true, data: { chat: c.id } }));
+    if (S.prefs.notif && document.hidden && 'Notification' in window && Notification.permission === 'granted') navigator.serviceWorker?.ready.then(r => r.showNotification('Llamada entrante · ' + chatTitle(c), { body: call.kind === 'video' ? 'Videollamada' : 'Llamada de voz', tag: 'call-' + call.id, requireInteraction: true, data: { chat: c.id } }));
     setTimeout(() => { if (incoming?.id === call.id) { incoming = null; ring(false); document.getElementById('incoming')?.remove(); } }, 45000);
   } else if (p.eventType === 'UPDATE') {
     if (incoming?.id === call.id && call.status !== 'ringing') {

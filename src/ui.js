@@ -202,4 +202,4 @@ export const onlyEmoji = t => !!t && t.length <= 12 && /^(\p{Extended_Pictograph
 export function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 export const uuid = () => crypto.randomUUID();
 export function copyText(t) { navigator.clipboard?.writeText(t).then(() => toast('Copiado'), () => toast('No se pudo copiar')); }
-export function download(name, blob) { const a = h('a', { href: URL.createObjectURL(blob), download: name }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000); }
+export function download(name, blob) { if (window.__dunaSave) return window.__dunaSave(name, blob); const a = h('a', { href: URL.createObjectURL(blob), download: name }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000); }

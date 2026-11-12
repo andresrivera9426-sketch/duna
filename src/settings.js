@@ -15,6 +15,7 @@ export function applyTheme() {
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   document.documentElement.style.fontSize = ({ s: '15px', m: '16px', l: '17.5px' })[S.prefs.font || 'm'];
   document.querySelector('meta[name=theme-color]')?.setAttribute('content', dark ? '#121022' : '#FBF6EF');
+  if (document.documentElement.classList.contains('native')) import('./native.js').then(n => n.nativeTheme(dark));
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
 
@@ -107,7 +108,24 @@ async function backup() {
   }
   download(`DUNA-copia-${new Date().toISOString().slice(0, 10)}.json`, new Blob([JSON.stringify(out, null, 1)], { type: 'application/json' }));
 }
+async function nativeNotifSheet() {
+  const N = await import('./native.js');
+  const i = await N.nativeInfo();
+  const yes = (ok, a, b) => h('span', { style: { color: ok ? 'var(--ok)' : 'var(--danger)', fontWeight: 600 } }, ok ? a : b);
+  const via = i.fcm ? 'Firebase Cloud Messaging (FCM), como WhatsApp' : 'conexión propia de DUNA en segundo plano';
+  const pv = h('input', { type: 'checkbox', checked: S.prefs.preview !== false, onchange: e => { S.prefs.preview = e.target.checked; savePrefs(); N.syncChatKeys(); } });
+  const s = sheet('Notificaciones', h('div', { class: 'form' },
+    h('p', null, 'Permiso de notificaciones: ', yes(i.notifications, 'concedido', 'falta')),
+    i.fcm ? null : h('p', null, 'Segundo plano sin restricción de batería: ', yes(i.battery, 'sí', 'no (pueden llegar tarde)')),
+    h('p', { class: 'muted' }, 'Vía de entrega: ' + via + (i.fcm ? '' : i.connected ? ' · conectada' : ' · conectando…')),
+    !i.notifications || (!i.fcm && !i.battery) ? h('button', { class: 'btn primary', onclick: async () => { await N.enableNativeNotifications(); savePrefs(); s.close(); setTimeout(() => nativeNotifSheet(), 1200); } }, 'Activar notificaciones') : null,
+    h('label', { class: 'switch' }, pv, h('span', null, 'Mostrar vista previa del texto')),
+    h('button', { class: 'btn ghost', onclick: () => N.Duna.testNotification() }, 'Probar notificación'),
+    h('button', { class: 'btn ghost', onclick: () => N.Duna.openSettings() }, 'Ajustes de notificaciones de Android (sonido, vibración)'),
+    h('p', { class: 'fine' }, 'Cada teléfono tiene su propia clave: el servidor cifra cada aviso antes de enviarlo. En los chats 1:1 el texto viaja cifrado de extremo a extremo y solo tu teléfono lo descifra para la vista previa. Los chats silenciados no notifican.')));
+}
 function notifSheet() {
+  if (document.documentElement.classList.contains('native')) return nativeNotifSheet();
   const st = h('p', { class: 'muted', id: 'notif-perm' }, 'Permiso del navegador: ' + (!('Notification' in window) ? 'no compatible' : ({ granted: 'concedido', denied: 'bloqueado', default: 'sin decidir' })[Notification.permission]));
   const en = h('input', { type: 'checkbox', checked: !!S.prefs.notif, onchange: async e => {
     if (e.target.checked && 'Notification' in window && Notification.permission !== 'granted') { const r = await Notification.requestPermission(); if (r !== 'granted') { e.target.checked = false; return toast('El navegador no dio permiso'); } }
