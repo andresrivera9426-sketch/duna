@@ -6,7 +6,7 @@
 [data-theme=dark]{--bg:#121022;--bg2:#17142B;--panel:#1B1831;--panel2:#221E3B;--ink:#F2EEFF;--ink2:#B7B0CF;--ink3:#857E9F;--line:#2C2747;
 --me:linear-gradient(135deg,#5B3FE0,#7C3AED 60%,#9333EA);--them:#262143;--them-ink:#F2EEFF;--name-l:72%;--shadow:0 10px 30px -12px rgba(0,0,0,.6);color-scheme:dark}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:1rem;line-height:1.35;overscroll-behavior:none}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:1rem;line-height:1.35;overscroll-behavior:none;overflow:hidden}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
 input,textarea,select{font:inherit;color:var(--ink);background:var(--panel2);border:1.5px solid var(--line);border-radius:14px;padding:.7rem .85rem;width:100%;outline:none;transition:border-color .15s}
 input:focus,textarea:focus,select:focus{border-color:var(--brand)}
