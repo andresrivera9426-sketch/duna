@@ -34,13 +34,20 @@ export async function openChat(id, fromRoute = false) {
   view.addEventListener('dragleave', e => { if (e.target === view) view.classList.remove('drop'); });
   view.addEventListener('drop', e => { e.preventDefault(); view.classList.remove('drop'); if (e.dataTransfer.files.length) import('./composer.js').then(m => m.attachFiles([...e.dataTransfer.files])); });
   joinTyping(id);
-  try {
-    if (!S.msgs.has(id) || S.msgs.get(id).length < 5) await loadMessages(id); else loadMessages(id).then(() => S.current === id && renderMsgs());
-    await loadChatExtras(id);
-    if (S.stars.size === 0) loadStars();
-    const vo = (S.msgs.get(id) || []).filter(m => m.view_once).map(m => m.id);
+  // Con mensajes ya en memoria (precargados) se pinta al instante y se actualiza en segundo plano;
+  // si no, mensajes y extras (reacciones, votos, fijados) se piden EN PARALELO (antes iban en serie).
+  const loadVo = async () => {
+    const vo = (S.msgs.get(id) || []).filter(m => m.view_once && !S.vo.has(m.id)).map(m => m.id);
     if (vo.length) { const { data } = await sb.from('view_once_opens').select('message_id').in('message_id', vo); (data || []).forEach(x => S.vo.add(x.message_id)); }
-  } catch (e) { toast('No se pudieron cargar los mensajes: ' + e.message); }
+  };
+  const warm = S.msgs.has(id) && S.msgs.get(id).length > 0 && S.extrasAt?.get(id);
+  const work = Promise.all([loadMessages(id), loadChatExtras(id).then(() => (S.extrasAt ||= new Map()).set(id, Date.now()))]).then(loadVo);
+  if (S.stars.size === 0) loadStars();
+  if (warm) {
+    work.then(() => { if (S.current === id) { renderMsgs(); renderPinbar(); } }).catch(() => {});
+  } else {
+    try { await work; } catch (e) { toast('No se pudieron cargar los mensajes: ' + e.message); }
+  }
   if (S.current !== id) return;
   renderMsgs(true);
   renderPinbar();

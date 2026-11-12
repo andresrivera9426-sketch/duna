@@ -19,9 +19,10 @@ async function kek(password, salt, it) {
 export async function createIdentity(password) {
   const kp = await subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
   const pub = await subtle.exportKey('jwk', kp.publicKey);
-  const wrapped = await wrapPrivate(kp.privateKey, password);
-  const priv = await subtle.importKey('jwk', await subtle.exportKey('jwk', kp.privateKey), { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
-  return { pub: { kty: pub.kty, crv: pub.crv, x: pub.x, y: pub.y }, wrapped, priv };
+  const jwk = await subtle.exportKey('jwk', kp.privateKey);
+  const wrapped = await wrapPrivate(jwk, password);
+  const priv = await subtle.importKey('jwk', jwk, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+  return { pub: { kty: pub.kty, crv: pub.crv, x: pub.x, y: pub.y }, wrapped, priv, jwk };
 }
 export async function wrapPrivate(privKey, password) {
   const jwk = privKey.extractable ? await subtle.exportKey('jwk', privKey) : privKey;

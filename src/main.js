@@ -1,7 +1,7 @@
 import { sb, rpc, avatarUrl } from './sb.js';
 import { h, $, icon, btn, logo, toast, menu, confirmDialog, fmtListTime, initials, hue, debounce, sheet } from './ui.js';
 import { loadMessages, loadChatExtras } from './state.js';
-import { S, on, emit, loadChats, refreshChat, chatTitle, chatPeer, previewText, tickState, nameOf, decryptMsg, upsertMsg, markDelivered, markRead, setPref, setReaction, loadProfiles, savePrefs } from './state.js';
+import { S, on, emit, loadChats, applyBoot, refreshChat, chatTitle, chatPeer, previewText, tickState, nameOf, decryptMsg, upsertMsg, markDelivered, markRead, setPref, setReaction, loadProfiles, savePrefs } from './state.js';
 import { authScreen, restoreKey, unlockSheet } from './auth.js';
 import { openChat, closeChat, rerenderChat, onTyping } from './chat.js';
 import { newChatSheet, newGroupSheet, openInvite, openUserLink } from './newchat.js';
@@ -227,7 +227,7 @@ export function resync(reason) {
       for (const c of S.chats.values()) if (c.unread > 0) markDelivered(c.id);
       const id = S.current;
       if (id && S.chats.has(id)) {
-        await loadMessages(id); await loadChatExtras(id).catch(() => {});
+        await Promise.all([loadMessages(id), loadChatExtras(id).catch(() => {})]);
         if (S.current === id) { rerenderChat(id, null, true); if (document.visibilityState === 'visible') markRead(id); }
       }
       emit('chats'); lastSync = Date.now(); window.__duna.lastSync = { at: lastSync, reason };
@@ -311,18 +311,21 @@ function showAuth() {
 async function start() {
   document.body.innerHTML = '<div class="splash">' + '<div class="splash-logo"></div><p>Cargando tus chats…</p></div>';
   $('.splash-logo').append(logo(84));
+  // Pinta al instante con la copia local (como WhatsApp) y actualiza en segundo plano; si no hay copia, espera una sola llamada.
+  let cached = null, fresh = null;
   try {
-    const { data: me, error } = await sb.from('profiles').select('*').eq('id', S.user.id).single();
-    if (error) throw error;
-    S.me = me; S.profiles.set(me.id, { ...me, online: true });
-    if (!S.priv) await restoreKey();
-    await loadChats();
+    const { kvGet } = await import('./crypto.js');
+    const [cache] = await Promise.all([S._boot ? null : kvGet('boot:' + S.user.id).catch(() => null), S.priv ? null : restoreKey()]);
+    if (S._boot) { fresh = S._boot; delete S._boot; await loadChats(fresh); }
+    else if (cache?.me && cache.me.id === S.user.id) { cached = cache; await applyBoot(cache); }
+    else { await loadChats(); }
   } catch (e) {
     console.error(e);
     if (String(e.message).match(/JWT|token|session/i)) { await sb.auth.signOut(); return showAuth(); }
     document.body.innerHTML = ''; document.body.append(h('div', { class: 'splash' }, h('p', null, 'No pudimos conectar: ' + e.message), h('button', { class: 'btn primary', onclick: () => location.reload() }, 'Reintentar')));
     return;
   }
+  if (cached) loadChats().catch(e => { console.warn('actualizar chats', e); if (String(e.message).match(/JWT|token/i)) { sb.auth.signOut().then(showAuth); } });
   renderShell();
   startRealtime(); initCalls();
   on('chats', () => { if (S.tab === 'chats') renderList(); updateBadges(); });
@@ -342,14 +345,24 @@ async function start() {
   if (!S.priv) setTimeout(() => unlockSheet(sheet, () => loadChats().then(() => S.current && openChat(S.current))), 400);
   setTimeout(() => { cleanupMine().catch(() => {}); cleanupOrphans(true).catch(() => {}); }, 8000);
   route();
+  setTimeout(prefetchChats, 1200);
   window.addEventListener('hashchange', route);
   window.addEventListener('popstate', () => { if (!location.hash.startsWith('#/c/') && S.current && innerWidth < 900) closeChat(true); });
-  if (S._newRecovery) { const code = S._newRecovery; delete S._newRecovery; import('./account.js').then(a => a.showRecoveryCode(code, true)); }
+  if (S._newRecoveryP) { const pr = S._newRecoveryP; delete S._newRecoveryP; pr.then(code => code && import('./account.js').then(a => a.showRecoveryCode(code, true))); }
   import('./account.js').then(a => a.syncPush()).catch(() => {});
   import('./extras.js').then(x => x.loadQuickReplies()).catch(() => {});
   if (isNative()) {
     nativeStart({ openChat, closeChat: () => closeChat(), resync, attachFiles: f => import('./composer.js').then(m => m.attachFiles(f)) }).catch(e => console.warn(e));
     on('chats', debounce(() => syncChatKeys(), 3000));
+  }
+}
+// Precarga los chats más recientes para que abrirlos sea instantáneo (Realtime los mantiene al día en memoria)
+async function prefetchChats() {
+  const top = [...S.chats.values()].filter(c => c.type !== 'community' && c.last_message && !S.msgs.has(c.id))
+    .sort((a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0)).slice(0, 6);
+  for (const c of top) {
+    if (S.msgs.has(c.id)) continue;
+    try { await Promise.all([loadMessages(c.id), loadChatExtras(c.id).then(() => (S.extrasAt ||= new Map()).set(c.id, Date.now()))]); } catch {}
   }
 }
 function markDeliveredAll() { for (const c of S.chats.values()) if (c.unread) markDelivered(c.id); }
@@ -368,7 +381,7 @@ function route() {
 }
 export async function logout() {
   if (!(await confirmDialog('¿Cerrar sesión en este dispositivo? Tus chats seguirán en tu cuenta.', 'Cerrar sesión', true))) return;
-  const { kvDel } = await import('./crypto.js'); await kvDel('priv:' + S.user.id);
+  const { kvDel } = await import('./crypto.js'); await kvDel('priv:' + S.user.id); await kvDel('boot:' + S.user.id);
   await (await import('./account.js')).disablePush().catch(() => {}); await kvDel('swcfg'); await unregisterDevice().catch(() => {});
   await sb.removeAllChannels(); await sb.auth.signOut(); localStorage.removeItem('duna-prefs'); location.hash = ''; location.reload();
 }

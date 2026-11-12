@@ -6,17 +6,19 @@ import { createRecovery, recoverSheet, linkNewDevice, unlockWithCode } from './a
 
 export async function setupKeys(password) {
   const uid = S.user.id;
-  const { data: k } = await sb.from('user_keys').select('enc_priv').eq('user_id', uid).maybeSingle();
-  const { data: me } = await sb.from('profiles').select('*').eq('id', uid).single();
+  // una sola llamada: perfil + clave envuelta + chats (start() la reutiliza y no vuelve a pedirlos)
+  const boot = await rpc('app_boot', { p_keys: true });
+  const k = boot.keys ? { enc_priv: boot.keys } : null, me = boot.me;
+  S._boot = boot;
   if (k?.enc_priv && me?.pub_key) {
     const { key } = await unwrapPrivate(k.enc_priv, password);
     S.priv = key;
   } else {
     const id = await createIdentity(password);
-    await sb.from('user_keys').upsert({ user_id: uid, enc_priv: id.wrapped });
-    await sb.from('profiles').update({ pub_key: id.pub }).eq('id', uid);
+    await Promise.all([sb.from('user_keys').upsert({ user_id: uid, enc_priv: id.wrapped }), sb.from('profiles').update({ pub_key: id.pub }).eq('id', uid)]);
+    if (boot.me) boot.me.pub_key = id.pub;
     S.priv = id.priv;
-    try { const { jwk } = await unwrapPrivate(id.wrapped, password, true); S._newRecovery = await createRecovery(jwk); } catch (e) { console.warn('recuperación', e); }
+    S._newRecoveryP = createRecovery(id.jwk).catch(e => { console.warn('recuperación', e); return null; }); // en paralelo: no frena la entrada
   }
   await kvSet('priv:' + uid, S.priv);
 }

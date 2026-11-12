@@ -35,18 +35,25 @@ export function nameOf(uid, { you = true } = {}) {
 }
 
 // ===== Chats =====
-export async function loadChats() {
-  const list = await rpc('chat_list');
+// Arranque en UNA llamada (app_boot): perfil propio + lista de chats + miembros + perfiles.
+// Se guarda una copia local (IndexedDB) para pintar la lista al instante en el siguiente arranque.
+export async function loadChats(boot) {
+  const d = boot || await rpc('app_boot', { p_keys: false });
+  await applyBoot(d);
+  if (S.user) import('./crypto.js').then(c => c.kvSet('boot:' + S.user.id, { ...d, keys: null })).catch(() => {});
+  return S.chats;
+}
+export async function applyBoot(d) {
+  const list = d.chats || [];
   const seen = new Set();
+  for (const p of d.profiles || []) S.profiles.set(p.id, { ...(S.profiles.get(p.id) || {}), ...p });
+  if (d.me) { S.me = d.me; S.profiles.set(d.me.id, { ...(S.profiles.get(d.me.id) || {}), ...d.me, online: true }); }
   for (const c of list) { c.id = c.chat_id; seen.add(c.id); S.chats.set(c.id, { ...(S.chats.get(c.id) || {}), ...c }); }
   for (const id of [...S.chats.keys()]) if (!seen.has(id)) S.chats.delete(id);
-  const { data: mem } = await sb.from('chat_members').select('*');
   S.members.clear();
-  for (const m of mem || []) { if (!S.members.has(m.chat_id)) S.members.set(m.chat_id, new Map()); S.members.get(m.chat_id).set(m.user_id, m); }
-  await loadProfiles([...list.map(c => c.other_id), ...(mem || []).map(m => m.user_id), ...list.map(c => c.last_message?.sender_id)]);
-  await Promise.all(list.filter(c => c.last_message?.enc).map(async c => { c.last_message = await decryptMsg(c.last_message, c.id); S.chats.get(c.id).last_message = c.last_message; }));
-  emit('chats');
-  return list;
+  for (const m of d.members || []) { if (!S.members.has(m.chat_id)) S.members.set(m.chat_id, new Map()); S.members.get(m.chat_id).set(m.user_id, m); }
+  await Promise.all(list.filter(c => c.last_message?.enc).map(async c => { const lm = await decryptMsg({ ...c.last_message }, c.id); S.chats.get(c.id).last_message = lm; }));
+  emit('profiles'); emit('chats');
 }
 export async function refreshChat(id) {
   const list = await rpc('chat_list');
