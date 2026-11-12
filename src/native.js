@@ -81,7 +81,8 @@ export async function registerDevice() {
     cur = { id: data.id, uid: S.user.id, ...dev };
     localStorage.setItem(LS, JSON.stringify(cur));
   }
-  await Duna.register({ url: SB_URL, apikey: SB_KEY, topic: cur.topic, key: cur.key, uid: S.user.id });
+  const fcmReady = await sb.rpc('native_fcm_ready').then(r => r.data === true, () => false);
+  await Duna.register({ url: SB_URL, apikey: SB_KEY, topic: cur.topic, key: cur.key, uid: S.user.id, fcmReady });
   const info = await Duna.info().catch(() => ({}));
   if (info.hasFcm) { const r = await Duna.fcmToken().catch(() => ({})); if (r?.token) await saveFcm(r.token); }
   return cur;

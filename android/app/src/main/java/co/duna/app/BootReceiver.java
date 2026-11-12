@@ -7,6 +7,6 @@ import android.content.Intent;
 /** Al encender el teléfono o actualizar la app, vuelve a conectar las notificaciones. */
 public class BootReceiver extends BroadcastReceiver {
     @Override public void onReceive(Context c, Intent i) {
-        if (Store.registered(c)) PushService.start(c);
+        if (Store.registered(c) && !Store.fcmMode(c)) PushService.start(c);
     }
 }

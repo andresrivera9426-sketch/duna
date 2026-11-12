@@ -53,7 +53,8 @@ public class DunaNativePlugin extends Plugin {
         PowerManager pm = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
         return pm.isIgnoringBatteryOptimizations(getContext().getPackageName());
     }
-    private boolean useFcm() { return BuildConfig.HAS_FCM && Store.p(getContext()).getString("fcm_token", null) != null; }
+    // Solo FCM cuando hay token y el servidor ya puede enviar por FCM; si no, sigue la conexión propia
+    private boolean useFcm() { return BuildConfig.HAS_FCM && Store.p(getContext()).getBoolean("fcm_ready", false) && Store.p(getContext()).getString("fcm_token", null) != null; }
 
     @PluginMethod public void info(PluginCall call) {
         JSObject o = new JSObject();
@@ -74,6 +75,7 @@ public class DunaNativePlugin extends Plugin {
         String url = call.getString("url"), apikey = call.getString("apikey"), topic = call.getString("topic"), key = call.getString("key"), uid = call.getString("uid");
         if (url == null || apikey == null || topic == null || key == null) { call.reject("faltan datos"); return; }
         Store.save(getContext(), url, apikey, topic, key, uid);
+        Store.p(getContext()).edit().putBoolean("fcm_ready", Boolean.TRUE.equals(call.getBoolean("fcmReady", false))).apply();
         applyMode();
         call.resolve();
     }

@@ -86,7 +86,7 @@ public class PushService extends Service {
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
-        if (!Store.registered(this)) { stopSelf(); return START_NOT_STICKY; }
+        if (!Store.registered(this) || Store.fcmMode(this)) { stopSelf(); return START_NOT_STICKY; }
         if (ws == null) connect();
         else if (!joined || SystemClock.elapsedRealtime() - lastRx > 2 * HEARTBEAT_MS + 10000) reconnect(0);
         scheduleWatchdog();
