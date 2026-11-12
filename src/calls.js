@@ -6,7 +6,7 @@ import { avatar, chatAvatar, beep } from './main.js';
 
 const ICE = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }, { urls: 'stun:global.stun.twilio.com:3478' }];
 let active = null, incoming = null, ringTimer = null;
-window.__duna = window.__duna || {}; Object.defineProperty(window.__duna, 'call', { get: () => active, configurable: true });
+window.__duna = window.__duna || {}; const LOG = window.__duna.callLog = []; const log = (...a) => { LOG.push(a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ').slice(0, 200)); if (LOG.length > 200) LOG.shift(); }; Object.defineProperty(window.__duna, 'call', { get: () => active, configurable: true });
 
 export function initCalls() {}
 function ring(on) { clearInterval(ringTimer); if (on) { const r = () => { beep(620, 0.25, 0.07); setTimeout(() => beep(780, 0.3, 0.07), 300); }; r(); ringTimer = setInterval(r, 2200); } }
@@ -51,7 +51,7 @@ export async function onCallEvent(p) {
       active.call = { ...active.call, ...call };
       const c = S.chats.get(call.chat_id);
       if (call.status === 'declined' && c?.type === 'direct') { toast('Llamada rechazada'); hangup(false); }
-      else if (call.status === 'ended' && c?.type === 'direct') hangup(false);
+      else if (['ended', 'missed'].includes(call.status) && (c?.type === 'direct' || !active.pcs.size)) hangup(false);
     }
   }
 }
@@ -88,7 +88,7 @@ function joinRoom() {
     .on('broadcast', { event: 'sig' }, ({ payload }) => { if (active === s && payload.to === me && payload.call === s.call.id) onSignal(payload); })
     .subscribe(async st => { if (st === 'SUBSCRIBED') await s.ch.track({ call_id: s.call.id, kind: s.call.kind, at: Date.now() }); if (st === 'CHANNEL_ERROR') toast('Error de señalización de la llamada'); });
 }
-const send = (to, type, data) => active?.ch.send({ type: 'broadcast', event: 'sig', payload: { call: active.call.id, from: S.user.id, to, type, data } });
+const send = (to, type, data) => { log('tx', type, to.slice(0, 6)); return active?.ch.send({ type: 'broadcast', event: 'sig', payload: { call: active.call.id, from: S.user.id, to, type, data } }).then(r => { if (r !== 'ok') log('send-res', r); return r; }); };
 function ensurePc(uid) {
   const s = active; if (s.pcs.has(uid)) return s.pcs.get(uid);
   const pc = new RTCPeerConnection({ iceServers: ICE });
@@ -98,7 +98,7 @@ function ensurePc(uid) {
   pc.onicecandidate = e => e.candidate && send(uid, 'ice', e.candidate.toJSON());
   pc.ontrack = e => { s.streams.set(uid, e.streams[0] || new MediaStream([e.track])); renderCallUI(); };
   pc.onconnectionstatechange = () => {
-    s.states[uid] = pc.connectionState;
+    s.states[uid] = pc.connectionState; log('state', pc.connectionState);
     if (pc.connectionState === 'connected') { if (!s.started) s.started = Date.now(); s.connectedOnce = true; clearTimeout(s.noAnswer); }
     if (pc.connectionState === 'failed') toast('No se pudo conectar el audio/video con ' + nameOf(uid) + '. Algunas redes necesitan un servidor TURN (no incluido).', 5000);
     renderCallUI();
@@ -111,7 +111,7 @@ async function makeOffer(uid) {
   send(uid, 'offer', pc.localDescription.toJSON());
 }
 async function onSignal({ from, type, data }) {
-  const s = active;
+  const s = active; log('rx', type, from.slice(0, 6));
   if (type === 'bye') return dropPeer(from);
   const pc = ensurePc(from);
   try {
@@ -120,18 +120,17 @@ async function onSignal({ from, type, data }) {
       const ans = await pc.createAnswer(); await pc.setLocalDescription(ans); send(from, 'answer', pc.localDescription.toJSON());
     } else if (type === 'answer') { await pc.setRemoteDescription(data); flushIce(from, pc); }
     else if (type === 'ice') { if (pc.remoteDescription) await pc.addIceCandidate(data).catch(() => {}); else { if (!s.pendingIce.has(from)) s.pendingIce.set(from, []); s.pendingIce.get(from).push(data); } }
-  } catch (e) { console.warn('señal', e); }
+  } catch (e) { log('err', type, e.message); }
 }
 function flushIce(uid, pc) { const q = active.pendingIce.get(uid) || []; active.pendingIce.delete(uid); q.forEach(c => pc.addIceCandidate(c).catch(() => {})); }
 function dropPeer(uid) {
   const s = active; if (!s) return; s.pcs.get(uid)?.close(); s.pcs.delete(uid); s.streams.delete(uid); delete s.states[uid];
   const c = S.chats.get(s.call.chat_id);
-  if (c?.type === 'direct' && s.connectedOnce) { toast('Llamada finalizada'); hangup(true); } else renderCallUI();
+  if (c?.type === 'direct' || !s.pcs.size) { toast('Llamada finalizada'); hangup(true); } else renderCallUI();
 }
 export async function hangup(updateDb = true) {
   const s = active; if (!s) return; active = null; clearTimeout(s.noAnswer); clearInterval(s.tick);
   for (const uid of s.pcs.keys()) s.ch?.send({ type: 'broadcast', event: 'sig', payload: { call: s.call.id, from: S.user.id, to: uid, type: 'bye' } });
-  try { s.ch && (await s.ch.untrack(), sb.removeChannel(s.ch)); } catch {}
   s.pcs.forEach(pc => pc.close()); s.local.getTracks().forEach(t => t.stop()); s.screen?.getTracks().forEach(t => t.stop());
   document.getElementById('call-ui')?.remove();
   const c = S.chats.get(s.call.chat_id);
@@ -139,6 +138,7 @@ export async function hangup(updateDb = true) {
     const status = s.connectedOnce ? 'ended' : (s.outgoing ? 'missed' : 'ended');
     await sb.from('calls').update({ status, ended_at: new Date().toISOString() }).eq('id', s.call.id);
   }
+  setTimeout(() => { try { s.ch?.untrack(); sb.removeChannel(s.ch); } catch {} }, 600);
   if (S.tab === 'calls') import('./main.js').then(m => m.renderSide());
 }
 

@@ -32,7 +32,7 @@ export function composer(c) {
     saveDraft(c.id, ta.value); mentionCheck(c, mention);
   });
   ta.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey && (S.prefs.enterSend !== false) && matchMedia('(pointer:fine)').matches) { e.preventDefault(); submit(); }
+    if (e.key === 'Enter' && !e.shiftKey && (S.prefs.enterSend !== false) && !matchMedia('(pointer:coarse)').matches) { e.preventDefault(); submit(); }
     if (e.key === 'Escape') { if (editing || reply) { clearExtra(); } }
     if (e.key === 'ArrowUp' && !ta.value) { const last = [...(S.msgs.get(c.id) || [])].reverse().find(m => m.sender_id === S.user.id && m.kind === 'text' && !m.deleted_for_all && Date.now() - new Date(m.created_at) < 15 * 60e3); if (last) { e.preventDefault(); setEdit(last); } }
   });

@@ -109,14 +109,15 @@ export function toast(msg, ms = 2600) {
 
 // Hojas modales
 export function sheet(title, content, { wide = false, onclose } = {}) {
-  const close = () => { wrap.classList.add('out'); setTimeout(() => wrap.remove(), 200); onclose && onclose(); document.removeEventListener('keydown', esc); };
-  const esc = e => { if (e.key === 'Escape') close(); };
-  const wrap = h('div', { class: 'sheet-wrap', onclick: e => { if (e.target === wrap) close(); } },
+  let closed = false;
+  const close = (dismiss) => { if (closed) return; closed = true; wrap.classList.add('out'); setTimeout(() => wrap.remove(), 200); if (dismiss === true && onclose) onclose(); document.removeEventListener('keydown', esc); };
+  const esc = e => { if (e.key === 'Escape' && wrap === [...document.querySelectorAll('.sheet-wrap')].pop()) close(true); };
+  const wrap = h('div', { class: 'sheet-wrap', onclick: e => { if (e.target === wrap) close(true); } },
     h('div', { class: 'sheet' + (wide ? ' wide' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
-      h('div', { class: 'sheet-head' }, h('h2', null, title), btn('x', 'Cerrar', close)),
+      h('div', { class: 'sheet-head' }, h('h2', null, title), btn('x', 'Cerrar', () => close(true))),
       h('div', { class: 'sheet-body' }, content)));
   document.body.append(wrap); document.addEventListener('keydown', esc);
-  setTimeout(() => { const f = wrap.querySelector('input,textarea,select'); if (f && matchMedia('(pointer:fine)').matches) f.focus(); }, 60);
+  setTimeout(() => { const f = wrap.querySelector('input,textarea,select'); if (f && !matchMedia('(pointer:coarse)').matches) f.focus(); }, 60);
   return { close, el: wrap };
 }
 export function confirmDialog(text, okLabel = 'Aceptar', danger = false, extra) {

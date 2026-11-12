@@ -1,0 +1,16 @@
+import puppeteer from 'puppeteer-core'; import fs from 'node:fs';
+const u = JSON.parse(fs.readFileSync('/workspace/duna-test-users.json'));
+const b = await puppeteer.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
+const p = await b.newPage(); await p.setViewport({ width: 1366, height: 768 });
+p.on('console', m => console.log('console', m.type(), m.text().slice(0, 300)));
+p.on('pageerror', e => console.log('PAGEERROR', e.message, e.stack?.slice(0, 500)));
+p.on('response', r => { if (r.status() >= 400) console.log('HTTP', r.status(), r.url().slice(0, 150)); });
+await p.goto('http://localhost:8088/', { waitUntil: 'networkidle2' });
+await p.type('#f-user', u.a.u); await p.type('#f-pass', u.a.p); await p.click('#f-submit'); await p.waitForSelector('#app');
+await new Promise(r => setTimeout(r, 1500));
+await p.evaluate(() => document.querySelector('.chat-row')?.click()); await p.waitForSelector('#msg-input');
+await p.type('#msg-input', 'debug hola'); await p.keyboard.press('Enter');
+await new Promise(r => setTimeout(r, 3000));
+console.log(await p.evaluate(() => document.querySelector('#msgs')?.innerText.slice(-400) + ' | toasts: ' + document.getElementById('toasts')?.innerText));
+await p.screenshot({ path: 'tests/out/debug.png' });
+await b.close();

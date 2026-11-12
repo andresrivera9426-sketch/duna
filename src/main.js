@@ -305,4 +305,5 @@ export async function logout() {
 }
 window.addEventListener('online', () => document.body.classList.remove('offline'));
 window.addEventListener('offline', () => document.body.classList.add('offline'));
+window.__duna = window.__duna || {}; window.__duna.S = S;
 boot();
