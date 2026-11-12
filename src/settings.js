@@ -130,8 +130,8 @@ async function nativeNotifSheet() {
     h('p', { class: 'fine' }, 'Con la vista previa activa verás quién escribe y el texto (también en la pantalla de bloqueo), y podrás tocar “Responder” o “Marcar como leído” sin abrir DUNA.'),
     h('button', { class: 'btn ghost', onclick: () => N.Duna.testNotification() }, 'Probar notificación'),
     h('button', { class: 'btn ghost', onclick: () => N.Duna.openSettings() }, 'Ajustes de notificaciones de Android (sonido, vibración)'),
-    h('button', { class: 'btn ghost', onclick: () => N.Duna.openAutostart() }, 'Ajustes de DUNA (batería, inicio automático)'),
-    h('p', { class: 'fine' }, 'Al tocar “Activar notificaciones” se abre la lista de optimización de batería: busca DUNA y elige “No optimizar” / “Sin restricciones”. ' + brandTip(i.brand)),
+    h('button', { class: 'btn ghost', onclick: () => N.Duna.openAutostart() }, 'Inicio automático / apps protegidas del fabricante'),
+    h('p', { class: 'fine' }, brandTip(i.brand)),
     h('p', { class: 'fine' }, 'Cada teléfono tiene su propia clave: el servidor cifra cada aviso antes de enviarlo. En los chats 1:1 el texto viaja cifrado de extremo a extremo y solo tu teléfono lo descifra para la vista previa. Los chats silenciados no notifican.')));
 }
 function notifSheet() {

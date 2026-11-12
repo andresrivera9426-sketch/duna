@@ -47,10 +47,10 @@ export async function nativeStart(h0) {
   takeShare();
   syncChatKeys();
   setTimeout(syncChatKeys, 8000); // los chats nuevos ya cargados: así la vista previa y "Responder" funcionan con la app cerrada
-  // Primera vez tras iniciar sesión: pide el permiso de notificaciones
+  // Primera vez tras iniciar sesión: pide el permiso de notificaciones y quitar la optimización de batería (como WhatsApp)
   if (!localStorage.getItem('duna-notif-asked')) {
     localStorage.setItem('duna-notif-asked', '1');
-    setTimeout(() => Duna.requestNotifications().catch(() => {}), 1500); // solo el permiso de Android; la batería, cuando la persona lo elige
+    setTimeout(() => enableNativeNotifications().catch(() => {}), 1500);
   }
 }
 
