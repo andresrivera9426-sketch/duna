@@ -62,3 +62,18 @@ export async function sendNative(sb: any, cfg: Record<string, string>, kind: str
   } else if (withFcm.length) out.fcm = 'sin cuenta de servicio';
   return out;
 }
+
+/** Diagnóstico sin secretos: obtiene el token OAuth y hace un envío validate_only a un token ficticio. */
+export async function fcmCheck(cfg: Record<string, string>) {
+  let sa: any = null; try { sa = cfg.fcm_sa ? JSON.parse(cfg.fcm_sa) : null; } catch { return { sa: 'json inválido' }; }
+  if (!sa) return { sa: 'no configurada' };
+  const out: any = { project_id: sa.project_id };
+  try { await fcmAccess(sa); out.oauth = 'ok'; } catch (e) { out.oauth = 'error: ' + String((e as Error).message).slice(0, 80); return out; }
+  const r = await fetch(`https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`, { method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await fcmAccess(sa) },
+    body: JSON.stringify({ validate_only: true, message: { token: 'duna-token-de-prueba-invalido', data: { t: 'check' } } }) });
+  const j = await r.json().catch(() => ({}));
+  out.send_status = r.status; out.send_error = j?.error?.status || null;
+  out.fcm_error_code = (j?.error?.details || []).map((d: any) => d.errorCode).filter(Boolean).join(',') || null;
+  return out;
+}
