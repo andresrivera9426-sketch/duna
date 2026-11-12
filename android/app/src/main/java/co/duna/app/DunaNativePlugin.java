@@ -32,10 +32,12 @@ public class DunaNativePlugin extends Plugin {
 
     @Override public void load() { inst = this; Notifier.channels(getContext()); }
 
-    static void emitOpen(String chat, String call) {
-        pendingChat = chat; pendingCall = call;
+    static boolean pendingAnswer = false;
+    static void emitOpen(String chat, String call) { emitOpen(chat, call, false); }
+    static void emitOpen(String chat, String call, boolean answer) {
+        pendingChat = chat; pendingCall = call; pendingAnswer = answer;
         if (inst != null && chat != null) {
-            JSObject o = new JSObject(); o.put("chat", chat); if (call != null) o.put("call", call);
+            JSObject o = new JSObject(); o.put("chat", chat); if (call != null) o.put("call", call); if (answer) o.put("answer", true);
             inst.notifyListeners("open", o, true);
         }
     }
@@ -184,8 +186,8 @@ public class DunaNativePlugin extends Plugin {
 
     @PluginMethod public void takeOpen(PluginCall call) {
         JSObject o = new JSObject();
-        if (pendingChat != null) { o.put("chat", pendingChat); if (pendingCall != null) o.put("call", pendingCall); }
-        pendingChat = null; pendingCall = null;
+        if (pendingChat != null) { o.put("chat", pendingChat); if (pendingCall != null) o.put("call", pendingCall); if (pendingAnswer) o.put("answer", true); }
+        pendingChat = null; pendingCall = null; pendingAnswer = false;
         call.resolve(o);
     }
     @PluginMethod public void takeShare(PluginCall call) {

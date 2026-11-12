@@ -61,8 +61,10 @@ final class Notifier {
         nm.createNotificationChannel(s);
     }
 
-    static PendingIntent openIntent(Context c, String chat, String call, int req) {
+    static PendingIntent openIntent(Context c, String chat, String call, int req) { return openIntent(c, chat, call, req, false); }
+    static PendingIntent openIntent(Context c, String chat, String call, int req, boolean answer) {
         Intent i = new Intent(c, MainActivity.class);
+        if (answer) i.putExtra("duna_answer", true);
         i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         i.setAction("co.duna.app.OPEN_" + req);
         if (chat != null) i.putExtra("duna_chat", chat);
@@ -220,10 +222,12 @@ final class Notifier {
                 .setTimeoutAfter(45000)
                 .setContentIntent(open)
                 .setFullScreenIntent(open, true)
-                .addAction(0, "Contestar", open)
+                .addAction(0, "Contestar", openIntent(c, chat, call, nid + 2, true)) // contesta directamente al abrir
                 .addAction(0, "Ignorar", PendingIntent.getBroadcast(c, nid, new Intent(c, DismissReceiver.class).putExtra("nid", nid), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
         try { NotificationManagerCompat.from(c).notify(nid, b.build()); } catch (SecurityException ignored) { }
     }
+
+    static void cancelCall(Context c, String chat) { NotificationManagerCompat.from(c).cancel(idFor("call:" + chat)); }
 
     static void clearChat(Context c, String chat) {
         history.remove(chat); meta.remove(chat);

@@ -42,8 +42,9 @@ export async function nativeStart(h0) {
   Duna.addListener('open', e => openFromNotification(e));
   Duna.addListener('share', () => takeShare());
   Duna.addListener('fcmToken', e => saveFcm(e.token));
-  await registerDevice().catch(e => console.warn('registro nativo', e));
+  // Primero lo que abrió la app (llamada entrante / chat): no esperar al registro del dispositivo
   const o = await Duna.takeOpen().catch(() => ({})); if (o?.chat) openFromNotification(o);
+  await registerDevice().catch(e => console.warn('registro nativo', e));
   takeShare();
   syncChatKeys();
   setTimeout(syncChatKeys, 8000); // los chats nuevos ya cargados: así la vista previa y "Responder" funcionan con la app cerrada
@@ -62,12 +63,14 @@ function onBack() {
   App.minimizeApp().catch(() => {});
 }
 
-async function openFromNotification({ chat, call }) {
+async function openFromNotification({ chat, call, answer }) {
   if (!chat) return;
   if (S.chats.has(chat)) hooks.openChat?.(chat);
   if (call) {
     const { data } = await sb.from('calls').select('*').eq('id', call).maybeSingle();
-    if (data?.status === 'ringing') (await import('./calls.js')).onCallEvent({ eventType: 'INSERT', new: data });
+    if (data?.status !== 'ringing') { if (data) toast('La llamada ya terminó'); return; }
+    const C = await import('./calls.js');
+    if (answer) C.answerFromNotification(data); else C.onCallEvent({ eventType: 'INSERT', new: data });
   }
 }
 

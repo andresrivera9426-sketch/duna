@@ -46,7 +46,8 @@ public class MainActivity extends BridgeActivity {
     private void handle(Intent i) {
         if (i == null) return;
         String chat = i.getStringExtra("duna_chat");
-        if (chat != null) { DunaNativePlugin.emitOpen(chat, i.getStringExtra("duna_call")); i.removeExtra("duna_chat"); return; }
+        if (chat != null) { DunaNativePlugin.emitOpen(chat, i.getStringExtra("duna_call"), i.getBooleanExtra("duna_answer", false)); i.removeExtra("duna_chat"); i.removeExtra("duna_answer");
+            if (i.getStringExtra("duna_call") != null) Notifier.cancelCall(this, chat); return; }
         String a = i.getAction();
         if (!Intent.ACTION_SEND.equals(a) && !Intent.ACTION_SEND_MULTIPLE.equals(a)) return;
         final Intent src = i;

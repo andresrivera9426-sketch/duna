@@ -334,7 +334,7 @@ async function start() {
   markDeliveredAll();
   heartbeat(); setInterval(heartbeat, 30000);
   setInterval(() => { if (document.visibilityState === 'visible') refreshPresence(); }, 25000);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { heartbeat(); resync('visible'); } });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { heartbeat(); resync('visible'); import('./calls.js').then(m => m.checkRinging()).catch(() => {}); } });
   window.addEventListener('online', () => resync('online'));
   window.addEventListener('focus', () => { if (Date.now() - lastSync > 15000) resync('focus'); });
   window.addEventListener('pageshow', e => { if (e.persisted) resync('pageshow'); });

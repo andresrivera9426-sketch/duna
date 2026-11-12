@@ -11,11 +11,27 @@ export const ICE = [
   { urls: 'stun:global.stun.twilio.com:3478' },
 ];
 const RTC_CFG = { iceServers: ICE, iceCandidatePoolSize: 4, bundlePolicy: 'max-bundle' };
+// Servidores TURN (relé) configurados en el servidor (private.app_config 'turn_ice'); sin ellos solo STUN.
+// Sin TURN, entre datos móviles (CGNAT) o redes estrictas la llamada puede quedarse en "Conectando…".
+let iceAt = 0, iceTurn = [];
+async function loadIce() {
+  if (Date.now() - iceAt < 10 * 60e3) return;
+  try { const { data } = await sb.rpc('ice_servers'); if (Array.isArray(data)) { iceTurn = data; iceAt = Date.now(); } } catch (e) { log('ice-cfg', e.message); }
+  RTC_CFG.iceServers = [...ICE, ...iceTurn];
+}
+export const hasTurn = () => iceTurn.length > 0;
 let active = null, incoming = null, ringTimer = null;
 Object.defineProperty(window.__duna = window.__duna || {}, 'call', { get: () => active, configurable: true });
 window.__duna = window.__duna || {}; const LOG = window.__duna.callLog = []; const log = (...a) => { LOG.push(a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ').slice(0, 200)); if (LOG.length > 200) LOG.shift(); }; Object.defineProperty(window.__duna, 'call', { get: () => active, configurable: true });
 
-export function initCalls() {}
+export function initCalls() { checkRinging(); }
+/** Al abrir/volver a la app (p. ej. desde la notificación de llamada): si hay una llamada sonando que no vimos por Realtime, se muestra. */
+export async function checkRinging() {
+  if (active || incoming || !S.user) return;
+  const since = new Date(Date.now() - 45000).toISOString();
+  const { data } = await sb.from('calls').select('*').eq('status', 'ringing').neq('caller_id', S.user.id).gt('created_at', since).order('created_at', { ascending: false }).limit(1);
+  if (data?.[0]) onCallEvent({ eventType: 'INSERT', new: data[0] });
+}
 function ring(on) { clearInterval(ringTimer); if (on) { const r = () => { beep(620, 0.25, 0.07); setTimeout(() => beep(780, 0.3, 0.07), 300); }; r(); ringTimer = setInterval(r, 2200); } }
 
 export async function startCall(chatId, kind = 'audio') {
@@ -24,7 +40,9 @@ export async function startCall(chatId, kind = 'audio') {
   if (c.type === 'direct' && !c.other_id) return toast('No puedes llamarte a ti mismo');
   if ((S.members.get(chatId)?.size || 2) > 6) return toast('Las llamadas grupales admiten hasta 6 personas en esta versión');
   let local;
+  loadIce();
   try { local = await getMedia(kind); } catch (e) { return toast('Sin acceso a micrófono/cámara: ' + e.message); }
+  await loadIce();
   const { data: call, error } = await sb.from('calls').insert({ chat_id: chatId, caller_id: S.user.id, kind, status: 'ringing' }).select().single();
   if (error) { local.getTracks().forEach(t => t.stop()); return toast('No se pudo iniciar la llamada: ' + error.message); }
   active = newSession(call, local, true);
@@ -74,9 +92,17 @@ async function decline(call) {
   incoming = null; ring(false); document.getElementById('incoming')?.remove();
   if (S.chats.get(call.chat_id)?.type === 'direct') await sb.from('calls').update({ status: 'declined', ended_at: new Date().toISOString() }).eq('id', call.id);
 }
+/** Contestar desde la notificación del teléfono (botón "Contestar"): sin segundo toque. */
+export async function answerFromNotification(call) {
+  if (active) return;
+  if (incoming && incoming.id !== call.id) return;
+  return accept(call);
+}
 async function accept(call) {
   incoming = null; ring(false); document.getElementById('incoming')?.remove();
+  loadIce();
   let local; try { local = await getMedia(call.kind); } catch (e) { try { local = await getMedia('audio'); } catch (e2) { return toast('Sin acceso al micrófono: ' + e2.message); } }
+  await loadIce();
   active = newSession(call, local, false);
   await sb.from('calls').update({ status: 'ongoing', answered_at: new Date().toISOString() }).eq('id', call.id);
   renderCallUI(); joinRoom();
@@ -127,7 +153,7 @@ function ensurePc(uid) {
     if (pc.connectionState === 'disconnected') s.discT[uid] = setTimeout(() => { if (active === s && pc.connectionState !== 'connected') restartIce(uid); }, 3000);
     if (pc.connectionState === 'failed') {
       if ((s.restarts[uid] || 0) < 4) restartIce(uid);
-      else toast('No se pudo conectar el audio/video con ' + nameOf(uid) + '. Algunas redes necesitan un servidor TURN (no incluido).', 6000);
+      else toast('No se pudo conectar el audio/video con ' + nameOf(uid) + (hasTurn() ? '. Revisa la conexión a internet.' : '. Entre datos móviles algunas redes necesitan un servidor de relé (TURN) que aún no está activado.'), 7000);
     }
     renderCallUI();
   };
@@ -204,7 +230,10 @@ function renderCallUI() {
     let t = grid.querySelector(`[data-uid="${uid}"]`);
     if (!t) { t = h('div', { class: 'call-tile', dataset: { uid } }, avatar(S.profiles.get(uid), 96), h('video', { autoplay: true, playsInline: true }), h('span', { class: 'call-name' }, nameOf(uid))); grid.append(t); }
     const v = t.querySelector('video'); const st = s.streams.get(uid);
-    if (st && v.srcObject !== st) v.srcObject = st;
+    if (st && v.srcObject !== st) { v.srcObject = st; v.muted = true; v.play?.().catch(() => {}); }
+    // El audio va en su propio <audio> con play() explícito (iPhone/Safari no siempre reproduce el sonido de un <video> oculto)
+    let au = t.querySelector('audio'); if (!au) { au = h('audio', { autoplay: true, playsInline: true }); t.append(au); }
+    if (st && au.srcObject !== st) { au.srcObject = st; au.play().catch(() => showAudioUnlock(au)); }
     const hasVid = st?.getVideoTracks().some(x => x.readyState === 'live' && !x.muted);
     t.classList.toggle('has-video', !!hasVid);
     t.dataset.state = s.states[uid] || 'new';
@@ -212,6 +241,11 @@ function renderCallUI() {
   if (!want.size) { grid.innerHTML = ''; grid.append(h('div', { class: 'call-tile solo' }, chatAvatar(c, 120), h('span', { class: 'call-name' }, chatTitle(c)))); }
   grid.dataset.n = want.size;
   setTimeout(() => active === s && grid.querySelectorAll('.call-tile[data-uid]').forEach(t => { const st = s.streams.get(t.dataset.uid); t.classList.toggle('has-video', !!st?.getVideoTracks().some(x => x.readyState === 'live' && !x.muted)); }), 1200);
+}
+function showAudioUnlock(au) {
+  if (document.getElementById('call-unmute')) return;
+  const b = h('button', { class: 'btn primary', id: 'call-unmute', style: { position: 'fixed', left: '50%', bottom: '120px', transform: 'translateX(-50%)', zIndex: 9999 }, onclick: () => { document.querySelectorAll('#call-ui audio').forEach(a => a.play().catch(() => {})); b.remove(); } }, '🔊 Toca para activar el audio');
+  document.body.append(b);
 }
 function toggleMute() { const s = active; s.muted = !s.muted; s.local.getAudioTracks().forEach(t => t.enabled = !s.muted); renderCallUI(); }
 async function toggleCam() {
