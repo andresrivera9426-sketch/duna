@@ -7,7 +7,11 @@ import android.os.Bundle;
 import android.provider.OpenableColumns;
 import android.util.Base64;
 
+import android.webkit.RenderProcessGoneDetail;
+import android.webkit.WebView;
+
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.BridgeWebViewClient;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 
@@ -22,6 +26,13 @@ public class MainActivity extends BridgeActivity {
     @Override public void onCreate(Bundle savedInstanceState) {
         registerPlugin(DunaNativePlugin.class);
         super.onCreate(savedInstanceState);
+        // Si el motor del WebView se cae (poca memoria), se recarga DUNA en lugar de cerrar la app
+        if (bridge != null) bridge.setWebViewClient(new BridgeWebViewClient(bridge) {
+            @Override public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                runOnUiThread(MainActivity.this::recreate);
+                return true;
+            }
+        });
         handle(getIntent());
     }
     @Override protected void onNewIntent(Intent intent) {

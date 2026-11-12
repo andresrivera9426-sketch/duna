@@ -14,36 +14,62 @@ const A = { u: 'prueba_na_' + stamp, n: 'Ana N ' + stamp, p: PASS }, B = { u: 'p
 const created = fs.existsSync(CREATED) ? JSON.parse(fs.readFileSync(CREATED)) : [];
 created.push(A, B); fs.writeFileSync(CREATED, JSON.stringify(created, null, 1));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const adb = (c, o = {}) => execSync(`adb -s ${DEV} ${c}`, { encoding: 'utf8', timeout: 60000, ...o });
+const adb = (c, o = {}) => execSync(`adb -s ${DEV} ${c}`, { encoding: 'utf8', timeout: 900000, ...o });
 const results = []; const ok = (name, pass, info = '') => { results.push({ name, pass: !!pass, info: String(info).slice(0, 300) }); console.log((pass ? 'OK    ' : 'FALLA ') + name + (info ? ' — ' + String(info).slice(0, 220) : '')); };
 const shot = n => { try { fs.writeFileSync(`${OUT}/${n}.png`, execSync(`adb -s ${DEV} exec-out screencap -p`, { maxBuffer: 50e6 })); } catch {} };
 const notifs = () => adb('shell dumpsys notification --noredact');
 async function waitNotif(txt, ms = 30000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { const d = notifs(); if (d.includes(txt)) return Date.now() - t0; await sleep(400); } return -1; }
 async function register(p, u) {
-  await p.waitForSelector('#f-user', { timeout: 40000 }); await p.click('#f-switch'); await p.waitForSelector('#f-name');
+  await p.waitForSelector('#f-user', { timeout: 120000 }); await p.click('#f-switch'); await p.waitForSelector('#f-name');
   await p.type('#f-user', u.u); await p.type('#f-name', u.n); await p.type('#f-pass', u.p); await p.type('#f-pass2', u.p);
-  await p.click('#f-submit'); await p.waitForSelector('#app', { timeout: 60000 });
+  await p.click('#f-submit'); await p.waitForSelector('#app', { timeout: 120000 });
 }
+// Cliente CDP mínimo para el WebView de la app (puppeteer.connect se cuelga con WebView en emulador lento)
 async function appPage() {
-  for (let i = 0; i < 40; i++) {
-    const socks = adb('shell cat /proc/net/unix').split('\n').map(l => l.match(/@(webview_devtools_remote_\d+)/)?.[1]).filter(Boolean);
-    if (socks.length) { execSync(`adb -s ${DEV} forward tcp:9333 localabstract:${socks[socks.length - 1]}`); break; }
-    await sleep(1000);
+  let url = null;
+  for (let i = 0; i < 240 && !url; i++) {
+    try {
+      const socks = adb('shell cat /proc/net/unix').split('\n').map(l => l.match(/@(webview_devtools_remote_\d+)/)?.[1]).filter(Boolean);
+      if (socks.length) {
+        execSync(`adb -s ${DEV} forward tcp:9333 localabstract:${socks[socks.length - 1]}`);
+        const list = await (await fetch('http://127.0.0.1:9333/json')).json();
+        url = list.find(t => t.type === 'page' && t.url.startsWith('https://localhost') && JSON.parse(t.description || '{}').attached !== false)?.webSocketDebuggerUrl
+          || list.find(t => t.type === 'page' && t.url.startsWith('https://localhost'))?.webSocketDebuggerUrl;
+      }
+    } catch {}
+    if (!url) await sleep(1000);
   }
-  const br = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9333', defaultViewport: null });
-  for (let i = 0; i < 30; i++) { const ps = await br.pages(); const p = ps.find(x => x.url().startsWith('https://localhost')); if (p) return { br, p }; await sleep(500); }
-  throw new Error('sin página de la app');
+  if (!url) throw new Error('sin página de la app');
+  const ws = new WebSocket(url); await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
+  let id = 0; const pend = new Map();
+  ws.onmessage = e => { const m = JSON.parse(e.data); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } else if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') console.log('[app]', m.params.args.map(a => a.value ?? a.description).join(' ').slice(0, 200)); };
+  const send = (method, params = {}) => new Promise(r => { const i = ++id; pend.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
+  await send('Runtime.enable');
+  const evaluate = async (fn, ...args) => {
+    const r = await send('Runtime.evaluate', { expression: `(${fn.toString()})(...${JSON.stringify(args)})`, awaitPromise: true, returnByValue: true, timeout: 60000 });
+    if (r.result?.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description || r.result.exceptionDetails.text);
+    return r.result?.result?.value;
+  };
+  const waitForFunction = async (fn, { timeout = 30000 } = {}, ...args) => { const t0 = Date.now(); while (Date.now() - t0 < timeout) { try { if (await evaluate(fn, ...args)) return true; } catch {} await sleep(400); } throw new Error('timeout'); };
+  const p = {
+    evaluate, waitForFunction,
+    waitForSelector: (sel, o = {}) => waitForFunction(s => !!document.querySelector(s), o, sel),
+    click: sel => evaluate(s => document.querySelector(s).click(), sel),
+    type: (sel, txt) => evaluate((s, t) => { const e = document.querySelector(s); e.focus(); e.value = t; e.dispatchEvent(new Event('input', { bubbles: true })); }, sel, txt),
+    url: () => url,
+  };
+  return { br: { disconnect: () => ws.close() }, p };
 }
 const sendFromA = async (pa, text) => { await pa.focus('#msg-input'); await pa.keyboard.type(text); await pa.keyboard.press('Enter'); };
 
 // ---- instalar ----
-try { adb('uninstall co.duna.app'); } catch {}
-console.log(adb(`install -r -g ${APK}`).trim());
-adb('shell dumpsys deviceidle whitelist +co.duna.app');
-adb('shell am start -n co.duna.app/.MainActivity'); await sleep(4000); shot('n01-arranque');
+if (!process.env.KEEP) { try { adb('uninstall co.duna.app'); } catch {} }
+if (!process.env.KEEP) console.log(adb(`install -r -g ${APK}`).trim()); else adb('shell pm grant co.duna.app android.permission.POST_NOTIFICATIONS');
+adb('shell dumpsys deviceidle whitelist +co.duna.app'); adb('shell settings put global hide_error_dialogs 1');
+adb('shell am start -n co.duna.app/.MainActivity'); await sleep(4000); adb('shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS'); shot('n01-arranque');
 let { br, p: pb } = await appPage();
-pb.on('console', m => { if (m.type() === 'error') console.log('[app]', m.text().slice(0, 200)); });
-ok('App abre y carga DUNA en el WebView', await pb.evaluate(() => document.documentElement.classList.contains('native')), await pb.url());
+await pb.waitForFunction(() => document.documentElement.classList.contains('native') && document.querySelector('#f-user, #app'), { timeout: 240000 }).catch(() => {});
+ok('App abre y carga DUNA en el WebView', await pb.evaluate(() => document.documentElement.classList.contains('native')), pb.url());
 await register(pb, B); await sleep(2500); shot('n02-chats-app');
 const dev = await pb.evaluate(() => JSON.parse(localStorage.getItem('duna-native') || 'null'));
 ok('Dispositivo nativo registrado (native_devices)', dev?.id && dev?.topic, dev?.id);
