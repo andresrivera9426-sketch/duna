@@ -17,7 +17,7 @@ function updatePlayers() {
     const dur = +el.dataset.dur || player.audio.duration || 0;
     el.classList.toggle('playing', on && !player.audio.paused);
     const pr = on ? (player.audio.currentTime / (player.audio.duration || dur || 1)) : 0;
-    el.style.setProperty('--p', Math.min(1, pr));
+    const bars = el.querySelectorAll('.awave i'); bars.forEach((b, k) => b.style.opacity = (k + 0.5) / bars.length <= pr ? 1 : 0.35);
     const t = el.querySelector('.adur'); if (t) t.textContent = on && player.audio.currentTime > 0 ? fmtDur(player.audio.currentTime) : fmtDur(dur);
     const b = el.querySelector('.aplay'); if (b) { b.innerHTML = ''; b.append(icon(on && !player.audio.paused ? 'pause' : 'play', 20)); }
   });

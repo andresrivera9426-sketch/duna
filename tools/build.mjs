@@ -1,0 +1,12 @@
+import { build } from 'esbuild';
+import fs from 'node:fs';
+import path from 'node:path';
+const V = process.env.DUNA_V || new Date().toISOString().replace(/\D/g, '').slice(0, 12);
+const out = 'docs';
+fs.mkdirSync(out + '/icons', { recursive: true });
+await build({ entryPoints: ['src/main.js'], bundle: true, minify: true, format: 'esm', target: ['es2020'], outfile: out + '/app.js', legalComments: 'none' });
+for (const f of ['index.html', 'manifest.webmanifest', 'sw.js', 'styles.css']) fs.writeFileSync(path.join(out, f), fs.readFileSync('web/' + f, 'utf8').replaceAll('__V__', V));
+for (const f of fs.readdirSync('web/icons')) fs.copyFileSync('web/icons/' + f, out + '/icons/' + f);
+fs.writeFileSync(out + '/.nojekyll', '');
+fs.writeFileSync(out + '/404.html', fs.readFileSync(out + '/index.html'));
+console.log('build', V, (fs.statSync(out + '/app.js').size / 1024).toFixed(1) + ' KB');

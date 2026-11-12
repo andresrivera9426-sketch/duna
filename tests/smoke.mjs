@@ -1,0 +1,10 @@
+import puppeteer from 'puppeteer-core';
+const URL = process.env.URL || 'http://localhost:8088/';
+const b = await puppeteer.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
+const p = await b.newPage(); await p.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+p.on('console', m => m.type() === 'error' && console.log('CONSOLE', m.text()));
+p.on('pageerror', e => console.log('PAGEERROR', e.message));
+await p.goto(URL, { waitUntil: 'networkidle0' });
+await p.screenshot({ path: 'tests/out-auth.png' });
+console.log(await p.evaluate(() => document.body.innerText.slice(0, 200)));
+await b.close();
