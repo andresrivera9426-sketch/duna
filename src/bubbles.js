@@ -3,6 +3,7 @@ import { h, icon, richText, onlyEmoji, fmtTime, fmtDur, fmtSize, toast, esc } fr
 import { S, nameOf, findMsg, previewText, systemText, emit, loadProfiles } from './state.js';
 import { mediaUrl } from './media.js';
 import { stickerUrl } from './stickers.js';
+import { gifUrl } from './gifs.js';
 import { avatar, ticks } from './main.js';
 
 // ===== Reproductor de audio único (no se interrumpe al redibujar) =====
@@ -181,7 +182,9 @@ export function bubble(m, { group, first, onAction, scrollTo }) {
   if (m.deleted_for_all) { content.push(h('i', { class: 'deleted' }, icon('block', 15), mine ? ' Eliminaste este mensaje' : ' Se eliminó este mensaje')); }
   else if (m._err) content.push(h('i', { class: 'deleted' }, icon('lock', 15), ' No se pudo descifrar este mensaje en este dispositivo'));
   else switch (m.kind) {
-    case 'image': case 'video': case 'gif': content.push(mediaBlock(m)); cls = m.view_once ? '' : ' has-media'; break;
+    case 'gif': if (m.meta?.cat && !m.media) { content.push(h('img', { class: 'gif-cat', src: gifUrl(m.meta.cat), alt: 'GIF', width: 220, height: 192 })); cls = ' has-media'; break; }
+    // falls through
+    case 'image': case 'video': content.push(mediaBlock(m)); cls = m.view_once ? '' : ' has-media'; break;
     case 'voice': case 'audio': content.push(audioPlayer(m)); cls = ' has-audio'; break;
     case 'document': content.push(docCard(m)); break;
     case 'location': content.push(locationCard(m)); cls = ' has-media'; break;

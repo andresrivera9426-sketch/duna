@@ -2,6 +2,7 @@ import { sb, rpc, EMAIL_DOMAIN } from './sb.js';
 import { h, logo, toast, icon } from './ui.js';
 import { createIdentity, unwrapPrivate, kvSet, kvGet } from './crypto.js';
 import { S } from './state.js';
+import { createRecovery, recoverSheet, linkNewDevice, unlockWithCode } from './account.js';
 
 export async function setupKeys(password) {
   const uid = S.user.id;
@@ -15,6 +16,7 @@ export async function setupKeys(password) {
     await sb.from('user_keys').upsert({ user_id: uid, enc_priv: id.wrapped });
     await sb.from('profiles').update({ pub_key: id.pub }).eq('id', uid);
     S.priv = id.priv;
+    try { const { jwk } = await unwrapPrivate(id.wrapped, password, true); S._newRecovery = await createRecovery(jwk); } catch (e) { console.warn('recuperación', e); }
   }
   await kvSet('priv:' + uid, S.priv);
 }
@@ -59,7 +61,10 @@ export function authScreen(onDone) {
       mode === 'register' ? h('label', null, 'Confirmar contraseña', pass2) : null,
       err, submit,
       h('button', { class: 'btn link', type: 'button', id: 'f-switch', onclick: () => { mode = mode === 'login' ? 'register' : 'login'; render(); } },
-        mode === 'login' ? '¿Nuevo en DUNA? Crea tu cuenta' : 'Ya tengo cuenta · Entrar'));
+        mode === 'login' ? '¿Nuevo en DUNA? Crea tu cuenta' : 'Ya tengo cuenta · Entrar'),
+      mode === 'login' ? h('div', { class: 'auth-more' },
+        h('button', { class: 'btn link', type: 'button', id: 'f-forgot', onclick: () => recoverSheet(onDone) }, '¿Olvidaste tu contraseña?'),
+        h('button', { class: 'btn link', type: 'button', id: 'f-link', onclick: () => linkNewDevice(onDone) }, icon('qr', 15), ' Vincular con otro dispositivo')) : null);
     if (mode === 'register') user.addEventListener('blur', async () => {
       const u = user.value.trim().toLowerCase(); if (!/^[a-z0-9_.]{3,24}$/.test(u)) return;
       try { if (!(await rpc('username_available', { p_username: u }))) err.textContent = 'Ese usuario ya está en uso.'; else err.textContent = ''; } catch {}
@@ -70,22 +75,26 @@ export function authScreen(onDone) {
         h('div', { class: 'auth-brand' }, logo(56), h('div', null, h('h1', null, 'DUNA'), h('p', null, 'Mensajes que se sienten cerca'))),
         h('h2', null, mode === 'login' ? 'Bienvenido de nuevo' : 'Crea tu cuenta en segundos'),
         form,
-        h('p', { class: 'fine' }, icon('lock', 14), ' Tus chats individuales se cifran de extremo a extremo en tu dispositivo. Guarda bien tu contraseña: sin ella no se pueden recuperar los mensajes cifrados.')));
+        h('p', { class: 'fine' }, icon('lock', 14), ' Tus chats individuales se cifran de extremo a extremo en tu dispositivo. Al crear tu cuenta recibes un código de recuperación: guárdalo para no perder el acceso ni tus mensajes cifrados.')));
   };
   render();
   return root;
 }
 
 export function unlockSheet(sheetFn, onDone) {
-  const pass = h('input', { type: 'password', placeholder: 'Tu contraseña', autocomplete: 'current-password' });
+  const pass = h('input', { type: 'password', placeholder: 'Tu contraseña o código de recuperación', autocomplete: 'current-password', id: 'unlock-pass' });
   const err = h('p', { class: 'err' });
   let s;
   const go = async () => {
-    try { await setupKeys(pass.value); s.close(); toast('Cifrado desbloqueado en este dispositivo'); onDone && onDone(); }
-    catch { err.textContent = 'Contraseña incorrecta'; }
+    const looksCode = /^[A-Z0-9]{5}(-?[A-Z0-9]{5}){4}$/i.test(pass.value.trim());
+    try {
+      if (looksCode) { await unlockWithCode(pass.value); toast('Cifrado desbloqueado con tu código de recuperación'); }
+      else { await setupKeys(pass.value); toast('Cifrado desbloqueado en este dispositivo'); }
+      s.close(); onDone && onDone();
+    } catch { err.textContent = looksCode ? 'Código de recuperación incorrecto' : 'Contraseña incorrecta'; }
   };
   pass.addEventListener('keydown', e => e.key === 'Enter' && go());
   s = sheetFn('Desbloquear cifrado', h('div', { class: 'form' },
-    h('p', { class: 'muted' }, 'Este dispositivo aún no tiene tu llave de cifrado. Escribe tu contraseña para leer y enviar mensajes cifrados 1:1.'),
-    pass, err, h('button', { class: 'btn primary', onclick: go }, 'Desbloquear')));
+    h('p', { class: 'muted' }, 'Este dispositivo aún no tiene tu llave de cifrado. Escribe tu contraseña (o tu código de recuperación) para leer y enviar mensajes cifrados 1:1.'),
+    pass, err, h('button', { class: 'btn primary', id: 'unlock-go', onclick: go }, 'Desbloquear')));
 }

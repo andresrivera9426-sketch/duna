@@ -6,6 +6,8 @@ import { compressImage } from './media.js';
 import { unwrapPrivate, wrapPrivate } from './crypto.js';
 import { wallpaperSheet, openChat, scrollToMsg, cleanupMine } from './chat.js';
 import { APP_URL } from './newchat.js';
+import { enablePush, disablePush, pushSupported, swConfig, regenerateRecovery, linkDeviceSheet } from './account.js';
+import { quickRepliesSheet } from './extras.js';
 
 export function applyTheme() {
   const t = S.prefs.theme || 'system';
@@ -23,12 +25,14 @@ export function openSettings(section) {
   s = sheet('Ajustes', h('div', { class: 'info' },
     h('button', { class: 'me-card', onclick: () => profileSheet() }, avatar(S.me, 64), h('div', { class: 'grow' }, h('b', null, S.me.display_name), h('small', null, S.me.about), h('small', { class: 'muted' }, '@' + S.me.username))),
     h('div', { class: 'info-sec' },
-      row('key', 'Cuenta', 'Contraseña, cifrado, eliminar cuenta', accountSheet),
+      row('key', 'Cuenta', 'Contraseña, código de recuperación, eliminar cuenta', accountSheet),
       row('lock', 'Privacidad', 'Últ. vez, foto, confirmaciones, bloqueados', privacySheet),
       row('chat', 'Chats', 'Tema, fondo, tamaño de letra, copia', chatsSheet),
       row('bell', 'Notificaciones', 'Mensajes, sonidos, llamadas', notifSheet),
       row('save', 'Almacenamiento', 'Uso y limpieza', storageSheet),
       row('star', 'Mensajes destacados', null, () => starredSheet()),
+      row('bolt', 'Respuestas rápidas', 'Atajos con “/” en el chat', () => quickRepliesSheet()),
+      row('broadcast', 'Listas de difusión', 'Un mensaje para varias personas', () => import('./extras.js').then(x => x.broadcastSheet())),
       row('device', 'Dispositivos vinculados', 'Usa DUNA en varios dispositivos', devicesSheet),
       row('info', 'Ayuda y acerca de', null, aboutSheet)),
     h('div', { class: 'info-sec' }, h('button', { class: 'info-row danger', id: 'logout-btn', onclick: () => logout() }, icon('logout', 20), 'Cerrar sesión'))), { wide: true });
@@ -104,17 +108,23 @@ async function backup() {
   download(`DUNA-copia-${new Date().toISOString().slice(0, 10)}.json`, new Blob([JSON.stringify(out, null, 1)], { type: 'application/json' }));
 }
 function notifSheet() {
-  const st = h('p', { class: 'muted' }, 'Permiso del navegador: ' + (!('Notification' in window) ? 'no compatible' : ({ granted: 'concedido', denied: 'bloqueado', default: 'sin decidir' })[Notification.permission]));
+  const st = h('p', { class: 'muted', id: 'notif-perm' }, 'Permiso del navegador: ' + (!('Notification' in window) ? 'no compatible' : ({ granted: 'concedido', denied: 'bloqueado', default: 'sin decidir' })[Notification.permission]));
   const en = h('input', { type: 'checkbox', checked: !!S.prefs.notif, onchange: async e => {
     if (e.target.checked && 'Notification' in window && Notification.permission !== 'granted') { const r = await Notification.requestPermission(); if (r !== 'granted') { e.target.checked = false; return toast('El navegador no dio permiso'); } }
     S.prefs.notif = e.target.checked; savePrefs(); toast('Guardado');
   } });
+  const pu = h('input', { type: 'checkbox', id: 'push-toggle', checked: !!S.prefs.push, disabled: !pushSupported(), onchange: async e => {
+    try { if (e.target.checked) { await enablePush(); toast('Notificaciones push activadas en este dispositivo'); } else { await disablePush(); toast('Push desactivado'); } }
+    catch (err) { e.target.checked = false; S.prefs.push = false; savePrefs(); toast('No se pudo activar push: ' + err.message); }
+  } });
   const snd = h('input', { type: 'checkbox', checked: S.prefs.sound !== false, onchange: e => { S.prefs.sound = e.target.checked; savePrefs(); } });
-  const pv = h('input', { type: 'checkbox', checked: S.prefs.preview !== false, onchange: e => { S.prefs.preview = e.target.checked; savePrefs(); } });
+  const pv = h('input', { type: 'checkbox', checked: S.prefs.preview !== false, onchange: e => { S.prefs.preview = e.target.checked; savePrefs(); swConfig(); } });
   sheet('Notificaciones', h('div', { class: 'form' }, st,
-    h('label', { class: 'switch' }, en, h('span', null, 'Notificaciones de mensajes y llamadas')), h('label', { class: 'switch' }, snd, h('span', null, 'Sonidos en la app')), h('label', { class: 'switch' }, pv, h('span', null, 'Mostrar vista previa del texto')),
+    h('label', { class: 'switch' }, en, h('span', null, 'Notificaciones con DUNA abierta o en segundo plano')),
+    h('label', { class: 'switch' }, pu, h('span', null, 'Notificaciones push con la app cerrada (mensajes y llamadas)')),
+    h('label', { class: 'switch' }, snd, h('span', null, 'Sonidos en la app')), h('label', { class: 'switch' }, pv, h('span', null, 'Mostrar vista previa del texto')),
     h('button', { class: 'btn ghost', onclick: () => navigator.serviceWorker?.ready.then(r => r.showNotification('DUNA', { body: 'Así se verán tus notificaciones', icon: 'icons/icon-192.png' })).catch(() => toast('No disponible')) }, 'Probar notificación'),
-    h('p', { class: 'fine' }, 'Las notificaciones llegan mientras DUNA está abierta o en segundo plano en el navegador. Las notificaciones push con la app completamente cerrada aún no están activas.')));
+    h('p', { class: 'fine' }, 'Push usa el servicio de notificaciones de tu navegador (Web Push con VAPID). En los chats cifrados 1:1 el servidor solo envía el texto cifrado y tu dispositivo lo descifra para mostrar la vista previa. En iPhone/iPad funciona solo si instalas DUNA en la pantalla de inicio (iOS 16.4 o superior). Los chats silenciados no envían push.')));
 }
 async function storageSheet() {
   const info = h('div', null, h('div', { class: 'spinner sm' }));
@@ -125,14 +135,23 @@ async function storageSheet() {
 }
 export async function cleanupOrphans(silent) { try { return await cleanupMine(); } catch (e) { if (!silent) toast(e.message); return 0; } }
 function accountSheet() {
+  const recStatus = h('p', { class: 'muted', id: 'rc-status' }, 'Consultando…');
+  rpc('recovery_status').then(d => { recStatus.textContent = d ? 'Activo desde ' + new Date(d).toLocaleDateString('es-CO', { dateStyle: 'medium' }) : 'No tienes código de recuperación. Genera uno ahora.'; }).catch(e => { recStatus.textContent = e.message; });
   sheet('Cuenta', h('div', { class: 'form' },
     h('p', { class: 'muted' }, 'Usuario: @' + S.me.username),
     h('button', { class: 'btn ghost', onclick: changePassword }, icon('key', 16), ' Cambiar contraseña'),
-    h('p', { class: 'fine' }, 'Tu llave de cifrado está protegida con tu contraseña. Si la olvidas no hay forma de recuperar los mensajes cifrados ni la cuenta (no usamos correo ni SMS).'),
+    h('h4', null, 'Código de recuperación'), recStatus,
+    h('button', { class: 'btn ghost', id: 'rc-new', onclick: () => regenerateRecovery() }, icon('lock', 16), ' Generar un código de recuperación nuevo'),
+    h('p', { class: 'fine' }, 'Con el código puedes restablecer tu contraseña desde la pantalla de inicio (“¿Olvidaste tu contraseña?”) y conservar tus mensajes cifrados. Sin contraseña ni código no hay forma de recuperar la cuenta: DUNA no usa correo ni SMS.'),
     h('button', { class: 'btn danger', onclick: async () => {
       if (!(await confirmDialog('Se eliminará tu cuenta, tu perfil y tu participación en todos los chats. Esta acción no se puede deshacer.', 'Eliminar mi cuenta', true))) return;
       const v = await prompt('Escribe ELIMINAR para confirmar'); if (v !== 'ELIMINAR') return toast('Cancelado');
-      await cleanupOrphans(true); await rpc('delete_my_account'); await sb.auth.signOut(); localStorage.clear(); location.reload();
+      try {
+        await disablePush();
+        const files = await rpc('my_storage_objects'); const byB = {}; for (const f of files || []) (byB[f.bucket] = byB[f.bucket] || []).push(f.name);
+        for (const [b, names] of Object.entries(byB)) for (let i = 0; i < names.length; i += 100) await sb.storage.from(b).remove(names.slice(i, i + 100));
+        await rpc('delete_my_account'); await sb.auth.signOut(); localStorage.clear(); indexedDB.deleteDatabase('duna'); location.reload();
+      } catch (e) { toast('No se pudo eliminar: ' + e.message); }
     } }, 'Eliminar mi cuenta')));
 }
 async function changePassword() {
@@ -154,7 +173,8 @@ async function changePassword() {
 function devicesSheet() {
   sheet('Dispositivos vinculados', h('div', { class: 'form' },
     h('p', null, 'DUNA es multidispositivo: abre ', h('code', null, APP_URL), ' en otro teléfono, tablet o computador e inicia sesión con tu usuario y contraseña. Tus chats aparecen en todos a la vez.'),
-    h('p', { class: 'fine' }, 'Tu llave de cifrado viaja protegida por tu contraseña, así que cada dispositivo puede leer los chats cifrados después de iniciar sesión.'),
+    h('button', { class: 'btn primary', id: 'link-dev', onclick: () => linkDeviceSheet() }, icon('qr', 16), ' Vincular un dispositivo (código QR)'),
+    h('p', { class: 'fine' }, 'Vincular con QR inicia sesión en el dispositivo nuevo sin escribir la contraseña. Para leer los chats cifrados allí se pide una vez tu contraseña o tu código de recuperación (la llave viaja protegida y nunca en claro).'),
     h('button', { class: 'btn danger', onclick: async () => { if (await confirmDialog('Se cerrará la sesión en todos tus dispositivos, incluido este.', 'Cerrar en todos', true)) { await sb.auth.signOut({ scope: 'global' }); location.reload(); } } }, 'Cerrar sesión en todos los dispositivos')));
 }
 function aboutSheet() {

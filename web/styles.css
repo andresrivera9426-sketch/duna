@@ -472,3 +472,19 @@ body.offline::before{content:'Sin conexión · reconectando…';position:fixed;t
   .msgs{padding-left:.55rem;padding-right:.55rem}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* ===== v2: GIF, recuperación, vincular, etiquetas, respuestas rápidas ===== */
+.gif-q{margin:.4rem .4rem 0;width:calc(100% - .8rem)}
+.gg{display:grid;grid-template-columns:repeat(3,1fr);gap:.4rem;padding:.4rem}
+.gg button{border-radius:14px;padding:.15rem;overflow:hidden}.gg button:hover{background:var(--panel2)}
+.gg img{width:100%;aspect-ratio:160/140;display:block;border-radius:12px}
+.gif-up{padding:.2rem .4rem}
+.gif-cat{width:220px;height:auto;aspect-ratio:160/140;display:block;border-radius:14px}
+.rcode{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.15rem;font-weight:800;letter-spacing:.06em;text-align:center;background:var(--panel2);border:1px dashed var(--line);border-radius:14px;padding:.8rem;word-break:break-all;user-select:all}
+.qr{width:min(240px,70vw);margin:.4rem auto;background:#fff;border-radius:16px;padding:8px}.qr svg{width:100%;height:auto;display:block}
+.qr-cam{width:100%;max-height:260px;border-radius:14px;background:#000;object-fit:cover}
+.auth-more{display:flex;flex-wrap:wrap;justify-content:center;gap:.2rem .8rem;margin-top:.2rem}
+.auth-more .btn.link{font-size:.88rem;display:inline-flex;align-items:center;gap:.25rem}
+.lbl-dot{color:var(--brand);display:inline-flex}
+.chip svg{vertical-align:-2px;margin-right:2px}
+.txt-btn{text-align:left;display:flex;flex-direction:column;min-width:0}.txt-btn small{color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chips{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none}.chips::-webkit-scrollbar{display:none}.chips .chip{flex:none}

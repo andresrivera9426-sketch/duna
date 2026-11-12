@@ -81,14 +81,15 @@ function renderChatsSide(side) {
       btn('more', 'Menú', e => menu([
         { icon: 'community', label: 'Nuevo grupo', action: () => newGroupSheet() },
         { icon: 'channel', label: 'Nuevo canal', action: () => newGroupSheet('channel') },
+        { icon: 'broadcast', label: 'Listas de difusión', action: () => import('./extras.js').then(m => m.broadcastSheet()) },
         { icon: 'star', label: 'Mensajes destacados', action: () => import('./settings.js').then(m => m.starredSheet()) },
         { icon: 'check2', label: 'Marcar todo como leído', action: () => { for (const c of S.chats.values()) if (c.unread || c.marked_unread) markRead(c.id); } },
         { icon: 'settings', label: 'Ajustes', action: () => openSettings() },
       ], e.currentTarget)),
     ]),
     h('div', { class: 'searchbar' }, icon('search', 18), search),
-    h('div', { class: 'chips', role: 'tablist' }, ['all:Todos', 'unread:No leídos', 'groups:Grupos', 'direct:Personas'].map(x => {
-      const [k, l] = x.split(':'); return h('button', { class: 'chip' + (filter === k ? ' on' : ''), role: 'tab', onclick: () => { filter = k; renderSide(); } }, l);
+    h('div', { class: 'chips', role: 'tablist' }, ['all:Todos', 'unread:No leídos', 'fav:Favoritos', 'groups:Grupos', 'direct:Personas', ...usedLabels().filter(l => l !== 'Favoritos').map(l => 'lbl=' + l + ':' + l)].map(x => {
+      const i = x.lastIndexOf(':'); const k = x.slice(0, i), l = x.slice(i + 1); return h('button', { class: 'chip' + (filter === k ? ' on' : ''), role: 'tab', dataset: { filter: k }, onclick: () => { filter = k; renderSide(); } }, k.startsWith('lbl=') ? icon('tag', 13) : null, l);
     })),
     listEl,
     h('button', { class: 'fab', id: 'fab-new', title: 'Nuevo chat', 'aria-label': 'Nuevo chat', onclick: () => newChatSheet() }, icon('plus', 26)));
@@ -104,6 +105,8 @@ function renderList(listEl) {
   else chats = chats.filter(c => showArchived ? c.archived : !c.archived);
   if (filter === 'unread') chats = chats.filter(c => c.unread > 0 || c.marked_unread);
   if (filter === 'groups') chats = chats.filter(c => c.type === 'group' || c.type === 'channel');
+  if (filter === 'fav') chats = chats.filter(c => (c.labels || []).includes('Favoritos'));
+  if (filter.startsWith('lbl=')) chats = chats.filter(c => (c.labels || []).includes(filter.slice(4)));
   if (filter === 'direct') chats = chats.filter(c => c.type === 'direct');
   chats.sort((a, b) => (!!b.pinned_at - !!a.pinned_at) || (b.pinned_at && a.pinned_at ? new Date(b.pinned_at) - new Date(a.pinned_at) : 0) || new Date(b.last_message_at) - new Date(a.last_message_at));
   if (showArchived) listEl.append(h('button', { class: 'archived-row', onclick: () => { showArchived = false; renderList(); } }, icon('back', 18), ' Archivados'));
@@ -111,6 +114,7 @@ function renderList(listEl) {
   if (!chats.length) listEl.append(h('div', { class: 'list-empty' }, q ? 'Sin resultados' : filter === 'all' ? h('div', null, h('p', null, 'Aún no tienes chats.'), h('button', { class: 'btn primary', onclick: () => newChatSheet() }, 'Empezar un chat')) : 'Nada por aquí'));
   for (const c of chats) listEl.append(chatRow(c));
 }
+function usedLabels() { const set = new Set(); for (const c of S.chats.values()) (c.labels || []).forEach(l => set.add(l)); return [...set].sort(); }
 function chatRow(c) {
   const m = c.last_message;
   const typing = S.typing.get(c.id);
@@ -127,6 +131,7 @@ function chatRow(c) {
     h('div', { class: 'row-main' },
       h('div', { class: 'row-top' }, h('span', { class: 'title' }, chatTitle(c), c.type === 'channel' ? icon('channel', 14, 'mini') : null), h('span', { class: 'time' + (c.unread ? ' hot' : '') }, m ? fmtListTime(m.created_at) : '')),
       h('div', { class: 'row-bot' }, prev, h('span', { class: 'flags' },
+        (c.labels || []).length ? h('span', { class: 'lbl-dot', title: c.labels.join(', ') }, icon('tag', 13)) : null,
         muted ? icon('belloff', 15) : null, c.pinned_at ? icon('pin', 15) : null,
         c.unread ? h('b', { class: 'count' + (muted ? ' muted' : '') }, c.unread > 99 ? '99+' : c.unread) : c.marked_unread ? h('b', { class: 'count dot' }) : null))));
   let lp; row.addEventListener('touchstart', e => { lp = setTimeout(() => { navigator.vibrate?.(15); rowMenu(c, row); }, 520); }, { passive: true });
@@ -141,6 +146,7 @@ export function rowMenu(c, anchor) {
       if (!c.pinned_at && [...S.chats.values()].filter(x => x.pinned_at).length >= 3) return toast('Puedes fijar hasta 3 chats');
       setPref(c.id, { pinned_at: c.pinned_at ? null : new Date().toISOString() }); } },
     { icon: muted ? 'bell' : 'belloff', label: muted ? 'Activar notificaciones' : 'Silenciar', action: () => muteMenu(c, anchor) },
+    { icon: 'tag', label: 'Etiquetar', action: () => import('./extras.js').then(x => x.labelSheet(c)) },
     { icon: 'unread', label: c.unread || c.marked_unread ? 'Marcar como leído' : 'Marcar como no leído', action: () => c.unread || c.marked_unread ? markRead(c.id) : setPref(c.id, { marked_unread: true }) },
     '-',
     { icon: 'trash', label: c.type === 'direct' ? 'Eliminar chat' : 'Vaciar chat', danger: true, action: async () => {
@@ -232,6 +238,7 @@ function notify(c, m, open) {
   const muted = c.muted_until && new Date(c.muted_until) > new Date();
   if (muted) return;
   if (!open && S.prefs.sound !== false) beep(740, 0.15);
+  if (S.prefs.push && document.hidden) return; // el servidor envía la notificación push
   if (S.prefs.notif && 'Notification' in window && Notification.permission === 'granted' && (document.hidden || !open)) {
     const title = c.type === 'direct' ? chatTitle(c) : `${chatTitle(c)} · ${nameOf(m.sender_id)}`;
     const body = S.prefs.preview === false ? 'Nuevo mensaje' : previewText(m);
@@ -284,6 +291,9 @@ async function start() {
   route();
   window.addEventListener('hashchange', route);
   window.addEventListener('popstate', () => { if (!location.hash.startsWith('#/c/') && S.current && innerWidth < 900) closeChat(true); });
+  if (S._newRecovery) { const code = S._newRecovery; delete S._newRecovery; import('./account.js').then(a => a.showRecoveryCode(code, true)); }
+  import('./account.js').then(a => a.syncPush()).catch(() => {});
+  import('./extras.js').then(x => x.loadQuickReplies()).catch(() => {});
 }
 function markDeliveredAll() { for (const c of S.chats.values()) if (c.unread) markDelivered(c.id); }
 async function heartbeat() { if (document.visibilityState !== 'visible') return; await sb.from('profiles').update({ last_seen: new Date().toISOString() }).eq('id', S.user.id); }
@@ -295,12 +305,14 @@ function route() {
   const hsh = location.hash;
   let m;
   if ((m = hsh.match(/^#\/invitar\/(.+)$/))) { history.replaceState(null, '', location.pathname); openInvite(decodeURIComponent(m[1])); }
+  else if ((m = hsh.match(/^#\/vincular\/([A-Z2-9]{10})$/))) { history.replaceState(null, '', location.pathname); import('./account.js').then(a => a.linkDeviceSheet(m[1])); }
   else if ((m = hsh.match(/^#\/u\/([a-z0-9_.]+)$/))) { history.replaceState(null, '', location.pathname); openUserLink(m[1]); }
   else if ((m = hsh.match(/^#\/c\/([0-9a-f-]{36})$/)) && S.current !== m[1] && S.chats.has(m[1])) openChat(m[1], true);
 }
 export async function logout() {
   if (!(await confirmDialog('¿Cerrar sesión en este dispositivo? Tus chats seguirán en tu cuenta.', 'Cerrar sesión', true))) return;
   const { kvDel } = await import('./crypto.js'); await kvDel('priv:' + S.user.id);
+  await (await import('./account.js')).disablePush().catch(() => {}); await kvDel('swcfg');
   await sb.removeAllChannels(); await sb.auth.signOut(); localStorage.removeItem('duna-prefs'); location.hash = ''; location.reload();
 }
 window.addEventListener('online', () => document.body.classList.remove('offline'));

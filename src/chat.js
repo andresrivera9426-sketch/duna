@@ -102,6 +102,8 @@ function chatMenu(c, anchor) {
     { icon: muted ? 'bell' : 'belloff', label: muted ? 'Activar notificaciones' : 'Silenciar notificaciones', action: () => muteMenu(c, anchor) },
     { icon: 'timer', label: 'Mensajes temporales', action: () => disappearingSheet(c) },
     { icon: 'wallpaper', label: 'Fondo de pantalla', action: () => wallpaperSheet(c) },
+    { icon: 'calendar', label: 'Mensajes programados', action: () => import('./extras.js').then(x => x.scheduledList(c)) },
+    { icon: 'tag', label: 'Etiquetas', action: () => import('./extras.js').then(x => x.labelSheet(c)) },
     { icon: 'download', label: 'Exportar chat', action: () => exportChat(c) },
     { icon: 'trash', label: 'Vaciar chat', danger: true, action: async () => {
       if (!(await confirmDialog('¿Vaciar este chat? Los mensajes se borrarán solo para ti.', 'Vaciar', true))) return;

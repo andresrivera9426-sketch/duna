@@ -4,8 +4,15 @@ import { h, icon, btn, toast, fmtDur, fmtListTime, menu } from './ui.js';
 import { S, chatTitle, nameOf, refreshChat } from './state.js';
 import { avatar, chatAvatar, beep } from './main.js';
 
-const ICE = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }, { urls: 'stun:global.stun.twilio.com:3478' }];
+// Solo servidores STUN públicos y gratuitos (varios proveedores por redundancia). Sin TURN: en redes con NAT simétrico o firewalls estrictos la llamada puede no conectar.
+export const ICE = [
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302', 'stun:stun3.l.google.com:19302', 'stun:stun4.l.google.com:19302'] },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
+];
+const RTC_CFG = { iceServers: ICE, iceCandidatePoolSize: 4, bundlePolicy: 'max-bundle' };
 let active = null, incoming = null, ringTimer = null;
+Object.defineProperty(window.__duna = window.__duna || {}, 'call', { get: () => active, configurable: true });
 window.__duna = window.__duna || {}; const LOG = window.__duna.callLog = []; const log = (...a) => { LOG.push(a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ').slice(0, 200)); if (LOG.length > 200) LOG.shift(); }; Object.defineProperty(window.__duna, 'call', { get: () => active, configurable: true });
 
 export function initCalls() {}
@@ -29,7 +36,7 @@ async function getMedia(kind) {
   return navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: kind === 'video' ? { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' } : false });
 }
 function newSession(call, local, outgoing) {
-  return { call, local, outgoing, pcs: new Map(), streams: new Map(), pendingIce: new Map(), ch: null, muted: false, camOff: call.kind !== 'video', started: null, connectedOnce: false, facing: 'user', states: {} };
+  return { call, local, outgoing, pcs: new Map(), streams: new Map(), pendingIce: new Map(), ch: null, muted: false, camOff: call.kind !== 'video', started: null, connectedOnce: false, facing: 'user', states: {}, missing: new Map(), restarts: {}, discT: {}, chRetry: 0 };
 }
 
 export async function onCallEvent(p) {
@@ -82,16 +89,32 @@ function joinRoom() {
       const st = s.ch.presenceState();
       const here = Object.entries(st).filter(([uid, arr]) => uid !== me && arr.some(x => x.call_id === s.call.id)).map(([uid]) => uid);
       for (const uid of here) if (!s.pcs.has(uid) && me < uid) makeOffer(uid);
-      for (const uid of [...s.pcs.keys()]) if (!here.includes(uid)) dropPeer(uid);
+      for (const uid of [...s.pcs.keys()]) {
+        if (here.includes(uid)) { clearTimeout(s.missing.get(uid)); s.missing.delete(uid); }
+        else if (!s.missing.has(uid)) s.missing.set(uid, setTimeout(() => { s.missing.delete(uid); if (active === s && s.pcs.has(uid)) { log('presence-timeout', uid.slice(0, 6)); dropPeer(uid); } }, 10000)); // margen para cortes breves de red
+      }
       renderCallUI();
     })
     .on('broadcast', { event: 'sig' }, ({ payload }) => { if (active === s && payload.to === me && payload.call === s.call.id) onSignal(payload); })
-    .subscribe(async st => { if (st === 'SUBSCRIBED') await s.ch.track({ call_id: s.call.id, kind: s.call.kind, at: Date.now() }); if (st === 'CHANNEL_ERROR') toast('Error de señalización de la llamada'); });
+    .subscribe(async st => {
+      log('ch', st);
+      if (st === 'SUBSCRIBED') { s.chRetry = 0; await s.ch.track({ call_id: s.call.id, kind: s.call.kind, at: Date.now() }); }
+      if ((st === 'CHANNEL_ERROR' || st === 'TIMED_OUT' || st === 'CLOSED') && active === s && s.chRetry < 6) {
+        s.chRetry++; const old = s.ch; setTimeout(() => { if (active !== s) return; sb.removeChannel(old); joinRoom(); }, 1500 * s.chRetry); // reconectar señalización
+      }
+    });
+}
+function restartIce(uid) {
+  const s = active; const pc = s?.pcs.get(uid); if (!pc) return;
+  s.restarts[uid] = (s.restarts[uid] || 0) + 1; if (s.restarts[uid] > 4) return;
+  log('ice-restart', uid.slice(0, 6), s.restarts[uid]);
+  if (S.user.id < uid) { pc.restartIce?.(); pc.createOffer({ iceRestart: true }).then(o => pc.setLocalDescription(o)).then(() => send(uid, 'offer', pc.localDescription.toJSON())).catch(e => log('restart-err', e.message)); }
+  else send(uid, 'restart', {});
 }
 const send = (to, type, data) => { log('tx', type, to.slice(0, 6)); return active?.ch.send({ type: 'broadcast', event: 'sig', payload: { call: active.call.id, from: S.user.id, to, type, data } }).then(r => { if (r !== 'ok') log('send-res', r); return r; }); };
 function ensurePc(uid) {
   const s = active; if (s.pcs.has(uid)) return s.pcs.get(uid);
-  const pc = new RTCPeerConnection({ iceServers: ICE });
+  const pc = new RTCPeerConnection(RTC_CFG);
   s.pcs.set(uid, pc);
   s.local.getTracks().forEach(t => pc.addTrack(t, s.local));
   if (s.call.kind === 'video' && !s.local.getVideoTracks().length) pc.addTransceiver('video', { direction: 'recvonly' });
@@ -99,8 +122,13 @@ function ensurePc(uid) {
   pc.ontrack = e => { s.streams.set(uid, e.streams[0] || new MediaStream([e.track])); renderCallUI(); };
   pc.onconnectionstatechange = () => {
     s.states[uid] = pc.connectionState; log('state', pc.connectionState);
-    if (pc.connectionState === 'connected') { if (!s.started) s.started = Date.now(); s.connectedOnce = true; clearTimeout(s.noAnswer); }
-    if (pc.connectionState === 'failed') toast('No se pudo conectar el audio/video con ' + nameOf(uid) + '. Algunas redes necesitan un servidor TURN (no incluido).', 5000);
+    clearTimeout(s.discT[uid]);
+    if (pc.connectionState === 'connected') { if (!s.started) s.started = Date.now(); s.connectedOnce = true; clearTimeout(s.noAnswer); s.restarts[uid] = 0; }
+    if (pc.connectionState === 'disconnected') s.discT[uid] = setTimeout(() => { if (active === s && pc.connectionState !== 'connected') restartIce(uid); }, 3000);
+    if (pc.connectionState === 'failed') {
+      if ((s.restarts[uid] || 0) < 4) restartIce(uid);
+      else toast('No se pudo conectar el audio/video con ' + nameOf(uid) + '. Algunas redes necesitan un servidor TURN (no incluido).', 6000);
+    }
     renderCallUI();
   };
   return pc;
@@ -113,6 +141,7 @@ async function makeOffer(uid) {
 async function onSignal({ from, type, data }) {
   const s = active; log('rx', type, from.slice(0, 6));
   if (type === 'bye') return dropPeer(from);
+  if (type === 'restart') return restartIce(from);
   const pc = ensurePc(from);
   try {
     if (type === 'offer') {
@@ -159,12 +188,13 @@ function renderCallUI() {
         navigator.mediaDevices?.getDisplayMedia ? h('button', { class: 'round', id: 'call-screen', 'aria-label': 'Compartir pantalla', onclick: shareScreen }, icon('screen')) : null,
         h('button', { class: 'round red', id: 'call-hang', 'aria-label': 'Colgar', onclick: () => hangup(true) }, icon('phoneoff'))));
     document.body.append(ui);
-    s.tick = setInterval(() => { const st = document.getElementById('call-status'); if (st && s.started) st.textContent = fmtDur((Date.now() - s.started) / 1000); }, 1000);
+    s.tick = setInterval(() => { const st = document.getElementById('call-status'); if (st && s.started) st.textContent = Object.values(s.states).some(x => x === 'disconnected' || x === 'failed') ? 'Reconectando…' : fmtDur((Date.now() - s.started) / 1000); }, 1000);
   }
   const lv = document.getElementById('call-local'); if (lv.srcObject !== (s.screen || s.local)) lv.srcObject = s.screen || s.local;
   lv.hidden = s.camOff && !s.screen;
   document.getElementById('call-title').textContent = chatTitle(c);
   if (!s.started) document.getElementById('call-status').textContent = s.pcs.size ? 'Conectando…' : (s.outgoing ? 'Llamando…' : 'Conectando…');
+  else if (Object.values(s.states).some(x => x === 'disconnected' || x === 'failed')) document.getElementById('call-status').textContent = 'Reconectando…';
   const mb = document.getElementById('call-mute'); mb.innerHTML = ''; mb.append(icon(s.muted ? 'micoff' : 'mic')); mb.classList.toggle('off', s.muted);
   const cb = document.getElementById('call-cam'); cb.innerHTML = ''; cb.append(icon(s.camOff ? 'videooff' : 'video')); cb.classList.toggle('off', s.camOff);
   const grid = document.getElementById('call-grid');

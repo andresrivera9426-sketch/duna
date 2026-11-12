@@ -173,10 +173,19 @@ export function previewText(m) {
   if (k) return m.body ? k.split(' ')[0] + ' ' + m.body : k;
   return m.body || '';
 }
-export function systemText(m) {
+const YO = { 'añadió': 'añadiste', 'eliminó': 'eliminaste', 'nombró': 'nombraste', 'quitó': 'quitaste', 'cambió': 'cambiaste', 'creó': 'creaste', 'activó': 'activaste', 'desactivó': 'desactivaste', 'permitió': 'permitiste', 'salió': 'saliste', 'fijó': 'fijaste', 'restableció': 'restableciste', 'actualizó': 'actualizaste', 'se': 'te' };
+function yo(txt) { // "Tú creó el grupo" -> "Creaste el grupo"
+  const m = txt.match(/^Tú (\S+)(.*)$/s); if (!m) return txt;
+  let [, v, rest] = m; if (v === 'se') { const r = rest.trim().split(' '); const v2 = { 'unió': 'uniste' }[r[0]] || r[0]; return 'Te ' + v2 + ' ' + r.slice(1).join(' '); }
+  const c = YO[v]; if (!c) return txt; const out = c + rest; return out[0].toUpperCase() + out.slice(1);
+}
+export function systemText(m) { return yo(systemText0(m)); }
+function systemText0(m) {
   const a = m.meta?.actor ? nameOf(m.meta.actor) : '';
+  const meT = m.meta?.target && m.meta.target === S.user?.id;
   const t = m.meta?.target ? nameOf(m.meta.target) : '';
   const b = m.body || '';
+  if (meT && / a$/.test(b) && m.meta?.actor !== S.user?.id) return `${a} te ${b.slice(0, -2)}`;
   if (b === 'cambió los mensajes temporales') {
     const s = m.meta?.seconds || 0;
     return s ? `${a} activó los mensajes temporales: ${s === 86400 ? '24 horas' : s === 604800 ? '7 días' : '90 días'}` : `${a} desactivó los mensajes temporales`;

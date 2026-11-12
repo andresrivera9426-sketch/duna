@@ -5,7 +5,9 @@ import { compressImage, videoInfo, audioDuration, uploadToChat, VoiceRecorder, L
 import { quoteBlock } from './bubbles.js';
 import { sendTyping, renderMsgs, emojiSheet } from './chat.js';
 import { STICKERS, stickerUrl, EMOJI, recentEmoji } from './stickers.js';
+import { gifUrl, searchGifs } from './gifs.js';
 import { avatar } from './main.js';
+import { QUICK_REPLIES, scheduleSheet } from './extras.js';
 
 let reply = null, editing = null, ta = null, rec = null;
 export function composer(c) {
@@ -29,7 +31,7 @@ export function composer(c) {
   const updateBtn = () => { const has = ta.value.trim().length > 0 || editing; sendB.innerHTML = ''; sendB.append(icon(has ? (editing ? 'check' : 'send') : 'mic', 22)); sendB.classList.toggle('mic', !has); sendB.setAttribute('aria-label', has ? 'Enviar' : 'Grabar nota de voz'); };
   ta.addEventListener('input', () => {
     ta.style.height = 'auto'; ta.style.height = Math.min(140, ta.scrollHeight) + 'px'; updateBtn(); if (ta.value) sendTyping('text');
-    saveDraft(c.id, ta.value); mentionCheck(c, mention);
+    saveDraft(c.id, ta.value); if (!quickCheck(mention)) mentionCheck(c, mention);
   });
   ta.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey && (S.prefs.enterSend !== false) && !matchMedia('(pointer:coarse)').matches) { e.preventDefault(); submit(); }
@@ -55,6 +57,10 @@ export function composer(c) {
     try { await sendMessage(c.id, { kind: 'text', body: text, reply_to: r?.id || null, meta: lp ? { ...(meta || {}), lp } : meta }); } catch (e) { toast('No se envió: ' + e.message); }
   };
   sendB.addEventListener('click', () => { if (ta.value.trim() || editing) submit(); else startVoice(c, wrap); });
+  const schedMenu = e => { e.preventDefault(); if (editing) return; menu([{ icon: 'calendar', label: 'Programar mensaje', action: () => scheduleSheet(c, ta.value.trim(), reply) }], sendB); };
+  sendB.addEventListener('contextmenu', schedMenu);
+  let lpT; sendB.addEventListener('touchstart', e => { if (!ta.value.trim()) return; lpT = setTimeout(() => schedMenu(e), 550); }, { passive: true });
+  ['touchend', 'touchmove'].forEach(ev => sendB.addEventListener(ev, () => clearTimeout(lpT), { passive: true }));
   const emojiB = btn('smile', 'Emojis, stickers y GIF', () => { panel.hidden = !panel.hidden; if (!panel.hidden) drawPanel(panel, c); });
   const attachB = btn('clip', 'Adjuntar', e => attachMenu(c, e.currentTarget));
   const camB = btn('camera', 'Cámara', () => pickFiles('image/*,video/*', true));
@@ -74,6 +80,14 @@ export function setEdit(m) {
   reply = null; editing = m; const x = $('#comp-extra'); if (!x) return; x.innerHTML = '';
   x.append(h('div', { class: 'reply-bar edit' }, h('div', { class: 'quote' }, h('div', null, h('b', null, 'Editar mensaje'), h('span', null, previewText(m).slice(0, 120)))), btn('x', 'Cancelar edición', () => { clearExtra(); ta.value = ''; ta.dispatchEvent(new Event('input')); })));
   ta.value = m.body || ''; ta.dispatchEvent(new Event('input')); ta.focus();
+}
+function quickCheck(pop) {
+  const v = ta.value; const m = v.match(/^\/([a-z0-9_]*)$/i);
+  if (!m || !QUICK_REPLIES.length) return false;
+  const arr = QUICK_REPLIES.filter(q => q.shortcut.startsWith(m[1].toLowerCase())).slice(0, 6);
+  pop.innerHTML = ''; pop.hidden = !arr.length;
+  for (const q of arr) pop.append(h('button', { class: 'qr-pick', dataset: { qr: q.shortcut }, onclick: () => { ta.value = q.body; pop.hidden = true; ta.focus(); ta.dispatchEvent(new Event('input')); } }, icon('bolt', 18), h('b', null, '/' + q.shortcut), h('small', null, q.body.slice(0, 60))));
+  return arr.length > 0;
 }
 function mentionCheck(c, pop) {
   if (c.type === 'direct') return;
@@ -97,8 +111,12 @@ function drawPanel(panel, c) {
     } else if (t === 'sticker') {
       body.append(h('div', { class: 'sg' }, Object.entries(STICKERS).map(([id, s]) => h('button', { title: s.label, onclick: () => { panel.hidden = true; sendMessage(c.id, { kind: 'sticker', meta: { id, label: s.label }, reply_to: reply?.id }).catch(e => toast(e.message)); clearExtra(); } }, h('img', { src: stickerUrl(id), alt: s.label })))));
     } else {
-      body.append(h('div', { class: 'gif-up' }, h('p', null, 'Envía un GIF animado desde tu dispositivo (máx. 4 MB).'), h('p', { class: 'fine' }, 'La búsqueda de GIF en internet requiere una clave de un proveedor externo (Tenor/Giphy) y no está activa.'),
-        h('button', { class: 'btn primary', onclick: () => pickFiles('image/gif') }, 'Elegir GIF')));
+      const q = h('input', { type: 'search', class: 'gif-q', placeholder: 'Buscar GIF (hola, jaja, gracias, cumple…)', 'aria-label': 'Buscar GIF' });
+      const grid = h('div', { class: 'gg', id: 'gif-grid' });
+      const draw = () => { grid.innerHTML = ''; const ids = searchGifs(q.value); if (!ids.length) grid.append(h('p', { class: 'muted' }, 'Sin resultados')); for (const id of ids) grid.append(h('button', { title: id, dataset: { gif: id }, onclick: () => { panel.hidden = true; sendMessage(c.id, { kind: 'gif', meta: { cat: id }, reply_to: reply?.id }).catch(e => toast(e.message)); clearExtra(); } }, h('img', { src: gifUrl(id), alt: id, loading: 'lazy' }))); };
+      q.addEventListener('input', debounce(draw, 120)); draw();
+      body.append(q, grid, h('div', { class: 'gif-up' }, h('button', { class: 'btn ghost sm', onclick: () => pickFiles('image/gif') }, 'Enviar un GIF desde mi dispositivo (máx. 4 MB)')),
+        h('p', { class: 'fine' }, 'Catálogo animado propio de DUNA: no usa proveedores externos ni ocupa almacenamiento.'));
     }
   };
   [['emoji', '😊 Emoji'], ['sticker', '✨ Stickers'], ['gif', 'GIF']].forEach(([t, l]) => tabs.append(h('button', { dataset: { t }, onclick: () => show(t) }, l)));
@@ -116,6 +134,7 @@ function attachMenu(c, anchor) {
     { icon: 'location', label: 'Ubicación', action: () => locationSheet(c) },
     { icon: 'user', label: 'Contacto', action: () => contactSheet(c) },
     c.type !== 'channel' || ['owner', 'admin'].includes(c.my_role) ? { icon: 'poll', label: 'Encuesta', action: () => pollSheet(c) } : null,
+    { icon: 'calendar', label: 'Programar mensaje', action: () => scheduleSheet(c, ta?.value.trim() || '', reply) },
   ], anchor);
 }
 function pickFiles(accept, capture, as) {
@@ -156,7 +175,7 @@ export async function sendFile(chatId, it, { caption = '', viewOnce = false, hd 
   Object.assign(media, up);
   return sendMessage(chatId, { kind: it.kind, body: caption || null, media, view_once: viewOnce && ['image', 'video'].includes(it.kind), reply_to: replyTo });
 }
-async function shrinkDataUrl(d) { const img = new Image(); img.src = d; await img.decode(); const c = document.createElement('canvas'); const s = 160 / Math.max(img.width, img.height); c.width = img.width * s; c.height = img.height * s; c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.55); }
+async function shrinkDataUrl(d, max = 160, q = 0.55) { const img = new Image(); img.src = d; await img.decode(); const c = document.createElement('canvas'); const s = Math.min(1, max / Math.max(img.width, img.height)); c.width = img.width * s; c.height = img.height * s; c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', q); }
 
 // ===== Nota de voz =====
 async function startVoice(c, wrap) {
@@ -253,12 +272,17 @@ function pollSheet(c) {
     } }, 'Enviar encuesta')));
 }
 
-// ===== Vista previa de enlaces (función de servidor) =====
-async function linkPreview(text) {
+// ===== Vista previa de enlaces (función de servidor "vista-enlace") =====
+export async function linkPreview(text) {
   const m = text.match(/\bhttps?:\/\/[^\s<]+[^\s<.,;:!?)"']/); if (!m || S.prefs.linkPreview === false) return null;
   try {
-    const ctrl = new AbortController(); setTimeout(() => ctrl.abort(), 3500);
-    const { data, error } = await sb.functions.invoke('vista-enlace', { body: { url: m[0] }, signal: ctrl.signal });
-    if (error || !data?.title) return null; return { url: m[0], title: data.title?.slice(0, 120), desc: data.description?.slice(0, 200), img: data.image?.slice(0, 500) };
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 7000);
+    const { data, error } = await sb.functions.invoke('vista-enlace', { body: { url: m[0] }, signal: ctrl.signal }); clearTimeout(t);
+    if (error || !data?.title) return null;
+    let img = null;
+    if (data.imageData) img = await shrinkDataUrl(data.imageData, 200, 0.5).catch(() => null);
+    if (img && img.length > 8000) img = await shrinkDataUrl(data.imageData, 120, 0.45).catch(() => null);
+    if (img && img.length > 8000) img = null;
+    return { url: m[0], title: data.title.slice(0, 120), desc: (data.description || '').slice(0, 200) || null, img };
   } catch { return null; }
 }
