@@ -362,6 +362,7 @@ try {
     await A.evaluate(() => document.querySelector('.rail-btn[data-tab="communities"]').click()); await A.waitForSelector('#new-community'); await A.click('#new-community');
     await A.waitForSelector('#group-title'); const cn = 'Comunidad ' + stamp; await A.type('#group-title', cn); await A.click('#group-create');
     const shown = await waitFn(A, t => [...document.querySelectorAll('.sheet h2, .com-card')].some(e => e.innerText.includes(t)), cn, 20000);
+    await A.waitForSelector('.sheet .invite-link', { timeout: 15000 }).catch(() => {}); await sleep(500);
     const link = await A.evaluate(() => document.querySelector('.sheet .invite-link')?.innerText || '');
     await shot(A, '06-comunidad-1366'); await closeSheets(A);
     let joined = false;

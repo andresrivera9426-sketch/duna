@@ -43,6 +43,27 @@ await B.evaluate(t => [...document.querySelectorAll('.chat-row')].find(r => r.in
 await A.evaluate(() => { window.__wsBlock = true; window.__ws.forEach(w => w.close(4001, 'corte')); }); await sleep(2000);
 await send(B, 'de B en corte ' + stamp); await sleep(12000); await A.evaluate(() => { window.__wsBlock = false; });
 ok('A recibe lo que B envió durante el corte de A', await has(A, 'de B en corte ' + stamp, 40000));
+// Latencia real: emisor → receptor (DOM), ambos sentidos, con el receptor en primer plano y en segundo plano
+async function lat(from, to, label, bg) {
+  let other = null; if (bg) { other = await to.browserContext().newPage(); await other.goto('about:blank'); await other.bringToFront(); await sleep(1500); }
+  const out = [];
+  for (let i = 0; i < 5; i++) {
+    const t = `lat ${label}${bg ? " bg" : ""} ${i} ${stamp}`;
+    await from.click('#msg-input'); await from.type('#msg-input', t, { delay: 0 });
+    const t0 = Date.now(); await from.keyboard.press('Enter');
+    const self = await from.waitForFunction(t => [...document.querySelectorAll('.mrow.me')].some(r => r.innerText.includes(t)), { timeout: 5000, polling: 10 }, t).then(() => Date.now() - t0, () => -1);
+    const got = await to.waitForFunction(t => (window.__duna.S.msgs.get(window.__duna.S.current) || []).some(m => m.body === t), { timeout: 15000, polling: 20 }, t).then(() => Date.now() - t0, () => -1);
+    out.push({ self, got }); await sleep(600);
+  }
+  if (other) { await other.close(); await to.bringToFront(); }
+  const g = out.map(x => x.got), sf = out.map(x => x.self);
+  const ok2 = g.every(x => x > 0 && x < 2000);
+  ok(`Latencia ${label}${bg ? ' (receptor en segundo plano)' : ''}: receptor ${g.join('/')} ms, emisor ve su mensaje ${sf.join('/')} ms`, ok2);
+  return out;
+}
+await B.bringToFront(); await sleep(1500);
+await lat(A, B, 'escritorio→móvil', false); await lat(B, A, 'móvil→escritorio', false);
+await lat(A, B, 'escritorio→móvil', true); await lat(B, A, 'móvil→escritorio', true);
 // Pestaña congelada (como suspensión/pestaña dormida) en B durante 40 s
 const cdp = await B.createCDPSession(); await cdp.send('Page.setWebLifecycleState', { state: 'frozen' });
 await send(A, 'congelada ' + stamp); await sleep(40000); await cdp.send('Page.setWebLifecycleState', { state: 'active' });
