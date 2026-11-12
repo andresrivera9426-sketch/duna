@@ -39,12 +39,10 @@ const waitFn = (p, fn, arg, timeout = 15000) => p.waitForFunction(fn, { timeout,
 async function ctxMsg(p, txt) {
   const finder = t => { const bs = [...document.querySelectorAll('.mrow .bubble')].reverse(); return bs.find(b => [...b.querySelectorAll('.txt')].some(x => x.innerText.trim().startsWith(t) && !x.closest('.quote'))) || bs.find(b => b.innerText.includes(t)); };
   await p.waitForFunction(finder, { timeout: 10000, polling: 250 }, txt).catch(() => {});
-  const hd = await p.evaluateHandle(finder, txt);
-  const el = hd.asElement(); if (!el) throw new Error('no encontré el mensaje ' + txt);
-  await el.evaluate(e => e.scrollIntoView({ block: 'center' })); await sleep(200);
   for (let i = 0; i < 3; i++) {
+    const el = (await p.evaluateHandle(finder, txt)).asElement(); if (!el) throw new Error('no encontré el mensaje ' + txt);
     await el.evaluate(e => e.scrollIntoView({ block: 'center' })); await sleep(300);
-    const box = await el.boundingBox(); await p.mouse.click(box.x + Math.min(40, box.width / 2), box.y + box.height - 10, { button: 'right' });
+    const box = await el.boundingBox(); if (!box) continue; await p.mouse.click(box.x + Math.min(40, box.width / 2), box.y + box.height - 10, { button: 'right' });
     if (await p.waitForSelector('.ctx', { timeout: 3000 }).then(() => true, () => false)) return;
     await closeSheets(p); await p.keyboard.press('Escape');
   }
