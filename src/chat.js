@@ -132,7 +132,8 @@ export function rerenderChat(chatId, msgId, isNew, headerOnly) {
   if (headerOnly && !msgId && !isNew) { renderHead(); }
   if (isNew) { const l = $('#msgs'); if (l && l.scrollHeight - l.scrollTop - l.clientHeight < 160) forceBottom = true; }
   if (renderQueued) return; renderQueued = true;
-  requestAnimationFrame(() => { renderQueued = false; renderMsgs(forceBottom); forceBottom = false; renderPinbar(); });
+  const run = () => { if (!renderQueued) return; renderQueued = false; renderMsgs(forceBottom); forceBottom = false; renderPinbar(); };
+  requestAnimationFrame(run); setTimeout(run, 250); // en pestañas ocultas requestAnimationFrame no corre
 }
 on('msgs', id => { if (id === S.current) { forceBottom = true; rerenderChat(id); } });
 on('rerender', () => S.current && rerenderChat(S.current));

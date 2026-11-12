@@ -3,7 +3,7 @@ export const SB_URL = 'https://jvaepilcxwnfssbxneiu.supabase.co';
 export const SB_KEY = 'sb_publishable_Xjb_xWzN36EL0z-5UbQShQ_cX2jkRG1'; // clave pública (publishable); la seguridad está en RLS
 export const sb = createClient(SB_URL, SB_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, storageKey: 'duna-auth' },
-  realtime: { params: { eventsPerSecond: 30 } },
+  realtime: { params: { eventsPerSecond: 30 }, worker: true }, // latido en Web Worker: no se congela en pestañas en segundo plano
 });
 export const EMAIL_DOMAIN = '@usuarios.duna.app';
 export async function rpc(fn, args = {}) {

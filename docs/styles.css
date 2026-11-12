@@ -488,3 +488,5 @@ body.offline::before{content:'Sin conexión · reconectando…';position:fixed;t
 .chip svg{vertical-align:-2px;margin-right:2px}
 .txt-btn{text-align:left;display:flex;flex-direction:column;min-width:0}.txt-btn small{color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chips{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none}.chips::-webkit-scrollbar{display:none}.chips .chip{flex:none}
+.push-banner{display:flex;align-items:center;gap:10px;margin:6px 10px 8px;padding:10px 12px;border-radius:14px;background:color-mix(in srgb,var(--accent,#6d4bff) 10%,transparent);border:1px solid color-mix(in srgb,var(--accent,#6d4bff) 25%,transparent)}
+.push-banner .grow{display:flex;flex-direction:column;min-width:0}.push-banner small{opacity:.75;font-size:12px;line-height:1.3}

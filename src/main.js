@@ -1,5 +1,6 @@
 import { sb, rpc, avatarUrl } from './sb.js';
 import { h, $, icon, btn, logo, toast, menu, confirmDialog, fmtListTime, initials, hue, debounce, sheet } from './ui.js';
+import { loadMessages, loadChatExtras } from './state.js';
 import { S, on, emit, loadChats, refreshChat, chatTitle, chatPeer, previewText, tickState, nameOf, decryptMsg, upsertMsg, markDelivered, markRead, setPref, setReaction, loadProfiles, savePrefs } from './state.js';
 import { authScreen, restoreKey, unlockSheet } from './auth.js';
 import { openChat, closeChat, rerenderChat, onTyping } from './chat.js';
@@ -112,7 +113,16 @@ function renderList(listEl) {
   if (showArchived) listEl.append(h('button', { class: 'archived-row', onclick: () => { showArchived = false; renderList(); } }, icon('back', 18), ' Archivados'));
   else if (archived.length && !q) listEl.append(h('button', { class: 'archived-row', onclick: () => { showArchived = true; renderList(); } }, icon('archive', 18), h('span', null, 'Archivados'), h('b', null, archived.length)));
   if (!chats.length) listEl.append(h('div', { class: 'list-empty' }, q ? 'Sin resultados' : filter === 'all' ? h('div', null, h('p', null, 'Aún no tienes chats.'), h('button', { class: 'btn primary', onclick: () => newChatSheet() }, 'Empezar un chat')) : 'Nada por aquí'));
+  const pb = pushBanner(); if (pb && !q) listEl.prepend(pb);
   for (const c of chats) listEl.append(chatRow(c));
+}
+function pushBanner() {
+  const sup = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  if (!sup || S.prefs.push || S.prefs.pushBannerOff || Notification.permission === 'denied') return null;
+  return h('div', { class: 'push-banner', id: 'push-banner' }, icon('bell', 20),
+    h('div', { class: 'grow' }, h('b', null, 'Activa las notificaciones'), h('small', null, 'Para recibir avisos de mensajes con DUNA cerrada o el equipo en reposo.')),
+    h('button', { class: 'btn primary sm', id: 'push-banner-on', onclick: async () => { try { const a = await import('./account.js'); await a.enablePush(); toast('Notificaciones activadas'); } catch (e) { toast(e.message); } renderList(); } }, 'Activar'),
+    h('button', { class: 'icon-btn', 'aria-label': 'Ocultar', onclick: () => { S.prefs.pushBannerOff = true; savePrefs(); renderList(); } }, icon('x', 18)));
 }
 function usedLabels() { const set = new Set(); for (const c of S.chats.values()) (c.labels || []).forEach(l => set.add(l)); return [...set].sort(); }
 function chatRow(c) {
@@ -192,7 +202,30 @@ function startRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'calls' }, p => onCallEvent(p))
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'stories' }, p => onStoryInsert(p.new))
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'view_once_opens' }, p => { S.vo.add(p.new.message_id); rerenderChat(S.current, p.new.message_id); })
-    .subscribe(st => { if (st === 'SUBSCRIBED') document.body.classList.remove('offline'); if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') document.body.classList.add('offline'); });
+    .subscribe(st => {
+      if (st === 'SUBSCRIBED') { document.body.classList.remove('offline'); if (rtWasUp) resync('reconexión'); rtWasUp = true; }
+      if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT' || st === 'CLOSED') document.body.classList.add('offline');
+    });
+}
+// Resincroniza con el servidor: Realtime no reenvía lo que pasó mientras la conexión estaba caída
+// (cambio de Wi-Fi a datos, pestaña dormida, PC suspendido). Sin esto, esos mensajes no aparecían.
+let rtWasUp = false, syncing = null, lastSync = 0;
+export function resync(reason) {
+  if (syncing) return syncing;
+  syncing = (async () => {
+    try {
+      await loadChats();
+      for (const c of S.chats.values()) if (c.unread > 0) markDelivered(c.id);
+      const id = S.current;
+      if (id && S.chats.has(id)) {
+        await loadMessages(id); await loadChatExtras(id).catch(() => {});
+        if (S.current === id) { rerenderChat(id, null, true); if (document.visibilityState === 'visible') markRead(id); }
+      }
+      emit('chats'); lastSync = Date.now(); window.__duna.lastSync = { at: lastSync, reason };
+    } catch (e) { console.warn('resync', reason, e.message); }
+    finally { syncing = null; }
+  })();
+  return syncing;
 }
 async function onMessage(m) {
   if (!S.chats.has(m.chat_id)) { await refreshChat(m.chat_id); }
@@ -250,7 +283,10 @@ function notify(c, m, open) {
 async function boot() {
   applyTheme();
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    const hadCtl = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js').then(reg => { document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); }); setInterval(() => reg.update().catch(() => {}), 30 * 60e3); }).catch(() => {});
+    // Si se publica una versión nueva con la app abierta, se recarga sola (si está oculta) o avisa
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (!hadCtl) return; if (document.hidden) location.reload(); else toast(h('span', null, 'Hay una versión nueva de DUNA. ', h('button', { class: 'txt-btn', onclick: () => location.reload() }, 'Actualizar')), 15000); });
     navigator.serviceWorker.addEventListener('message', e => { if (e.data?.chat) openChat(e.data.chat); });
   }
   const { data: { session } } = await sb.auth.getSession();
@@ -285,7 +321,14 @@ async function start() {
   markDeliveredAll();
   heartbeat(); setInterval(heartbeat, 30000);
   setInterval(() => { if (document.visibilityState === 'visible') refreshPresence(); }, 25000);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { heartbeat(); if (S.current) markRead(S.current); loadChats().catch(() => {}); } });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { heartbeat(); resync('visible'); } });
+  window.addEventListener('online', () => resync('online'));
+  window.addEventListener('focus', () => { if (Date.now() - lastSync > 15000) resync('focus'); });
+  window.addEventListener('pageshow', e => { if (e.persisted) resync('pageshow'); });
+  document.addEventListener('resume', () => resync('resume')); // pestaña descongelada (pestañas dormidas de Edge/Chrome, Android)
+  // Red de seguridad: si el canal no está unido, o cada 2 min con la app visible, resincroniza
+  setInterval(() => { if (document.visibilityState !== 'visible') return; const down = rtChannel && rtChannel.state !== 'joined'; if (down || Date.now() - lastSync > 120000) resync(down ? 'canal caído' : 'periódica'); }, 20000);
+  lastSync = Date.now();
   if (!S.priv) setTimeout(() => unlockSheet(sheet, () => loadChats().then(() => S.current && openChat(S.current))), 400);
   setTimeout(() => { cleanupMine().catch(() => {}); cleanupOrphans(true).catch(() => {}); }, 8000);
   route();
