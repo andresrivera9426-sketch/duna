@@ -38,7 +38,7 @@ export async function nativeStart(h0) {
   if (!isNative()) return;
   hooks = h0;
   App.addListener('backButton', onBack);
-  App.addListener('appStateChange', ({ isActive }) => { if (isActive) { hooks.resync?.('app activa'); takeShare(); if (S.current) Duna.clearChat({ chat: S.current }).catch(() => {}); } });
+  App.addListener('appStateChange', ({ isActive }) => { if (isActive) { hooks.resync?.('app activa'); takeShare(); if (S.current) Duna.clearChat({ chat: S.current }).catch(() => {}); } else syncChatKeys(); });
   Duna.addListener('open', e => openFromNotification(e));
   Duna.addListener('share', () => takeShare());
   Duna.addListener('fcmToken', e => saveFcm(e.token));
@@ -46,6 +46,12 @@ export async function nativeStart(h0) {
   const o = await Duna.takeOpen().catch(() => ({})); if (o?.chat) openFromNotification(o);
   takeShare();
   syncChatKeys();
+  setTimeout(syncChatKeys, 8000); // los chats nuevos ya cargados: así la vista previa y "Responder" funcionan con la app cerrada
+  // Primera vez tras iniciar sesión: pide el permiso de notificaciones y quitar la optimización de batería (como WhatsApp)
+  if (!localStorage.getItem('duna-notif-asked')) {
+    localStorage.setItem('duna-notif-asked', '1');
+    setTimeout(() => enableNativeNotifications().catch(() => {}), 1500);
+  }
 }
 
 function onBack() {
@@ -81,8 +87,15 @@ export async function registerDevice() {
     cur = { id: data.id, uid: S.user.id, ...dev };
     localStorage.setItem(LS, JSON.stringify(cur));
   }
+  // secreto de "respuesta rápida" (Responder / Marcar como leído desde la notificación): el servidor guarda solo su SHA-256
+  if (!cur.reply) {
+    const reply = b64url(rnd(32));
+    const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(reply)))].map(x => x.toString(16).padStart(2, '0')).join('');
+    const { error } = await sb.from('native_devices').update({ reply_hash: hash }).eq('id', cur.id);
+    if (!error) { cur.reply = reply; localStorage.setItem(LS, JSON.stringify(cur)); }
+  }
   const fcmReady = await sb.rpc('native_fcm_ready').then(r => r.data === true, () => false);
-  await Duna.register({ url: SB_URL, apikey: SB_KEY, topic: cur.topic, key: cur.key, uid: S.user.id, fcmReady });
+  await Duna.register({ url: SB_URL, apikey: SB_KEY, topic: cur.topic, key: cur.key, uid: S.user.id, fcmReady, reply: cur.reply || null });
   const info = await Duna.info().catch(() => ({}));
   if (info.hasFcm) { const r = await Duna.fcmToken().catch(() => ({})); if (r?.token) await saveFcm(r.token); }
   return cur;
@@ -130,7 +143,8 @@ export async function nativeInfo() { return isNative() ? Duna.info().catch(() =>
 export async function enableNativeNotifications() {
   const r = await Duna.requestNotifications().catch(() => ({}));
   const info = await Duna.info();
-  if (!info.fcm && !info.battery) await Duna.requestBattery().catch(() => {});
+  // Aunque FCM de prioridad alta atraviesa Doze, algunos fabricantes (Xiaomi, Huawei, Oppo, Samsung…) matan apps optimizadas
+  if (!info.battery) await Duna.requestBattery().catch(() => {});
   S.prefs.push = true; S.prefs.notif = true;
   return r.granted ?? info.notifications;
 }

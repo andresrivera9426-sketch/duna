@@ -105,7 +105,10 @@ export async function fcmCheck(cfg: Record<string, string>) {
 /** Prueba real a un dispositivo (por id de native_devices); devuelve solo el estado y el nombre del mensaje de Google. */
 export async function fcmTest(sb: any, cfg: Record<string, string>, deviceId: string) {
   let sa: any = null; try { sa = JSON.parse(cfg.fcm_sa || ''); } catch { return { sa: 'no configurada' }; }
-  const { data } = await sb.from('native_devices').select('fcm_token').eq('id', deviceId).maybeSingle();
+  const { data } = await sb.from('native_devices').select('fcm_token, key, user_id').eq('id', deviceId).maybeSingle();
   if (!data?.fcm_token) return { device: 'sin token FCM' };
-  return await fcmSend(sa, data.fcm_token, { t: 'test' }, 600, { t: 'msg', ct: 'direct', title: 'DUNA', kind: 'text', chat: '' });
+  // Igual que un mensaje real (solo datos, cifrado con la clave del dispositivo): lo arma DunaFcmService en el teléfono
+  const p = { t: 'msg', ct: 'group', chat: 'duna-test', title: 'DUNA', from: 'DUNA', kind: 'text', body: '✅ Prueba de notificación (pantalla apagada / app cerrada)', uid: data.user_id, at: Math.floor(Date.now() / 1000) };
+  const sealed = await seal(data.key, p);
+  return await fcmSend(sa, data.fcm_token, { id: String(Date.now()), v: '1', iv: sealed.iv, ct: sealed.ct }, 600, p);
 }

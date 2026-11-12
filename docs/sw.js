@@ -1,5 +1,5 @@
-const V = 'duna-202611121914';
-const CORE = ['./', 'index.html', 'app.js?v=202611121914', 'styles.css?v=202611121914', 'manifest.webmanifest', 'icons/logo.svg', 'icons/icon-192.png'];
+const V = 'duna-202611122006';
+const CORE = ['./', 'index.html', 'app.js?v=202611122006', 'styles.css?v=202611122006', 'manifest.webmanifest', 'icons/logo.svg', 'icons/icon-192.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(CORE)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {
@@ -10,10 +10,10 @@ self.addEventListener('fetch', e => {
 });
 self.addEventListener('notificationclick', e => {
   e.notification.close();
-  const chat = e.notification.data?.chat;
+  const chat = e.notification.data?.chat, reply = e.action === 'reply';
   e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => {
     const c = cs[0];
-    if (c) { c.focus(); if (chat) c.postMessage({ chat }); return; }
+    if (c) { c.focus(); if (chat) c.postMessage({ chat, reply }); return; }
     return self.clients.openWindow('./' + (chat ? '#/c/' + chat : ''));
   }));
 });
@@ -56,7 +56,9 @@ self.addEventListener('push', e => {
     let body = d.vo ? '① ' + (kind === 'image' ? 'Foto' : 'Video') + ' de una vista' : KIND[kind] ? KIND[kind] + (text ? ' ' + text : '') : (text || (d.enc ? '🔒 Nuevo mensaje cifrado' : 'Nuevo mensaje'));
     if (cfg.preview === false) body = 'Nuevo mensaje';
     if (d.ct && d.ct !== 'direct') body = (d.from || '') + ': ' + body;
-    return self.registration.showNotification(d.title || 'DUNA', { ...opts, body: body.slice(0, 240) });
+    // Botón "Responder" donde el navegador admite acciones (Chrome Android/escritorio, Edge, Firefox). iOS no muestra acciones.
+    const actions = !apple && 'actions' in Notification.prototype && d.chat ? [{ action: 'reply', title: 'Responder' }] : undefined;
+    return self.registration.showNotification(d.title || 'DUNA', { ...opts, body: body.slice(0, 240), actions, timestamp: d.at ? d.at * 1000 : Date.now(), vibrate: [200, 100, 200] });
   })());
 });
 self.addEventListener('pushsubscriptionchange', () => {});

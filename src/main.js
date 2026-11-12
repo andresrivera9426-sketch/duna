@@ -297,7 +297,7 @@ async function boot() {
     navigator.serviceWorker.register('sw.js').then(reg => { document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); }); setInterval(() => reg.update().catch(() => {}), 30 * 60e3); }).catch(() => {});
     // Si se publica una versión nueva con la app abierta, se recarga sola (si está oculta) o avisa
     navigator.serviceWorker.addEventListener('controllerchange', () => { if (!hadCtl) return; if (document.hidden) location.reload(); else toast(h('span', null, 'Hay una versión nueva de DUNA. ', h('button', { class: 'txt-btn', onclick: () => location.reload() }, 'Actualizar')), 15000); });
-    navigator.serviceWorker.addEventListener('message', e => { if (e.data?.chat) openChat(e.data.chat); });
+    navigator.serviceWorker.addEventListener('message', async e => { if (e.data?.chat) { await openChat(e.data.chat); if (e.data.reply) setTimeout(() => document.getElementById('msg-input')?.focus(), 300); } });
   }
   const { data: { session } } = await sb.auth.getSession();
   if (!session) return showAuth();

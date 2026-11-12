@@ -63,6 +63,15 @@ final class Sec {
     }
 
     /** AES-256-GCM con iv/ct en base64 (formato de la función push y del cifrado E2E de DUNA). */
+    /** Cifra igual que la web (encJSON): AES-GCM, iv de 12 bytes, devuelve {v:1, iv, ct} en base64. */
+    static org.json.JSONObject aesSeal(String keyB64, String plain) throws Exception {
+        byte[] iv = new byte[12]; new java.security.SecureRandom().nextBytes(iv);
+        Cipher cph = Cipher.getInstance("AES/GCM/NoPadding");
+        cph.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(Base64.decode(keyB64, Base64.NO_WRAP), "AES"), new GCMParameterSpec(128, iv));
+        byte[] ct = cph.doFinal(plain.getBytes(StandardCharsets.UTF_8));
+        return new org.json.JSONObject().put("v", 1).put("iv", Base64.encodeToString(iv, Base64.NO_WRAP)).put("ct", Base64.encodeToString(ct, Base64.NO_WRAP));
+    }
+
     static String aesOpen(String keyB64, String ivB64, String ctB64) throws Exception {
         Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
         c.init(Cipher.DECRYPT_MODE, new SecretKeySpec(b64(keyB64), "AES"), new GCMParameterSpec(128, b64(ivB64)));

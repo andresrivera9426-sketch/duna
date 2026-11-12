@@ -8,10 +8,13 @@ import android.content.Intent;
 import android.media.AudioAttributes;
 import android.media.RingtoneManager;
 import android.os.Build;
+import android.os.PowerManager;
+import android.app.Notification;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.app.Person;
+import androidx.core.app.RemoteInput;
 
 import org.json.JSONObject;
 
@@ -25,7 +28,10 @@ final class Notifier {
     static final String CH_MSG = "duna_msgs";
     static final String CH_CALL = "duna_calls";
     static final String CH_SERVICE = "duna_service";
+    static final String KEY_REPLY = "duna_reply_text";
+    // historial por chat: {remitente, texto, hora, "1" si es mío}
     private static final Map<String, List<String[]>> history = new HashMap<>();
+    private static final Map<String, String[]> meta = new HashMap<>(); // chat -> {título, tipo}
     private static final Map<String, String> KIND = new HashMap<>();
     static {
         KIND.put("image", "📷 Foto"); KIND.put("video", "🎬 Video"); KIND.put("audio", "🎵 Audio"); KIND.put("voice", "🎤 Nota de voz");
@@ -38,7 +44,10 @@ final class Notifier {
         NotificationManager nm = c.getSystemService(NotificationManager.class);
         NotificationChannel m = new NotificationChannel(CH_MSG, "Mensajes", NotificationManager.IMPORTANCE_HIGH);
         m.setDescription("Mensajes nuevos de tus chats y grupos");
-        m.enableVibration(true); m.setShowBadge(true);
+        m.enableVibration(true); m.setVibrationPattern(new long[]{0, 250, 150, 250}); m.setShowBadge(true);
+        m.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
+                new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_INSTANT).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build());
+        m.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE); m.enableLights(true);
         nm.createNotificationChannel(m);
         NotificationChannel call = new NotificationChannel(CH_CALL, "Llamadas", NotificationManager.IMPORTANCE_HIGH);
         call.setDescription("Llamadas y videollamadas entrantes");
@@ -106,31 +115,90 @@ final class Notifier {
         if (!preview) body = "Mensaje nuevo";
         if (body.length() > 240) body = body.substring(0, 240) + "…";
 
+        if (d.optBoolean("big", false) && text == null) body = "Mensaje nuevo";
+        addHistory(chat, from, body, false);
+        meta.put(chat, new String[]{title, d.optString("ct", "direct")});
+        post(c, chat, false);
+    }
+
+    private static void addHistory(String chat, String from, String body, boolean mine) {
         List<String[]> h = history.get(chat);
         if (h == null) { h = new ArrayList<>(); history.put(chat, h); }
-        h.add(new String[]{from, body, String.valueOf(System.currentTimeMillis())});
-        while (h.size() > 7) h.remove(0);
+        h.add(new String[]{from, body, String.valueOf(System.currentTimeMillis()), mine ? "1" : "0"});
+        while (h.size() > 8) h.remove(0);
+    }
 
+    /** Publica (o actualiza en silencio) la notificación de un chat: estilo conversación + Responder + Marcar como leído. */
+    static void post(Context c, String chat, boolean silent) {
+        List<String[]> h = history.get(chat);
+        String[] mt = meta.get(chat);
+        if (h == null || h.isEmpty() || mt == null) return;
+        String title = mt[0]; boolean group = !"direct".equals(mt[1]);
+        String last = h.get(h.size() - 1)[1];
         Person me = new Person.Builder().setName("Tú").build();
         NotificationCompat.MessagingStyle st = new NotificationCompat.MessagingStyle(me);
         if (group) { st.setConversationTitle(title); st.setGroupConversation(true); }
-        for (String[] x : h) st.addMessage(x[1], Long.parseLong(x[2]), new Person.Builder().setName(x[0]).build());
+        int unread = 0;
+        for (String[] x : h) {
+            boolean mine = "1".equals(x[3]);
+            if (!mine) unread++;
+            st.addMessage(x[1], Long.parseLong(x[2]), mine ? null : new Person.Builder().setName(x[0]).build());
+        }
+        int nid = idFor(chat);
+        RemoteInput ri = new RemoteInput.Builder(KEY_REPLY).setLabel("Escribe un mensaje").build();
+        PendingIntent replyPi = PendingIntent.getBroadcast(c, nid, new Intent(c, ReplyReceiver.class).setAction("co.duna.app.REPLY")
+                .putExtra("chat", chat).putExtra("ct", mt[1]).putExtra("title", title), PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0));
+        PendingIntent readPi = PendingIntent.getBroadcast(c, nid + 1, new Intent(c, ReplyReceiver.class).setAction("co.duna.app.READ")
+                .putExtra("chat", chat), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        NotificationCompat.Action reply = new NotificationCompat.Action.Builder(0, "Responder", replyPi)
+                .addRemoteInput(ri).setAllowGeneratedReplies(true)
+                .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY).setShowsUserInterface(false).build();
+        NotificationCompat.Action read = new NotificationCompat.Action.Builder(0, "Marcar como leído", readPi)
+                .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ).setShowsUserInterface(false).build();
+        boolean canReply = Store.reply(c) != null && !"duna-test".equals(chat);
 
         NotificationCompat.Builder b = new NotificationCompat.Builder(c, CH_MSG)
                 .setSmallIcon(R.drawable.ic_stat_duna)
                 .setColor(0xFF6D4BFF)
                 .setContentTitle(title)
-                .setContentText(group ? from + ": " + body : body)
+                .setContentText(last)
                 .setStyle(st)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
-                .setNumber(h.size())
-                .setContentIntent(openIntent(c, chat, null, idFor(chat)))
+                .setOnlyAlertOnce(silent)
+                .setSilent(silent)
+                .setNumber(unread)
+                .setContentIntent(openIntent(c, chat, null, nid))
                 .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                 .setGroup("duna_msgs");
-        try { NotificationManagerCompat.from(c).notify(idFor(chat), b.build()); } catch (SecurityException ignored) { }
+        // Pantalla de bloqueo: con "Mostrar vista previa" se ve el texto (como WhatsApp); sin ella, solo "Mensaje nuevo".
+        boolean pv = Store.preview(c);
+        b.setVisibility(pv ? NotificationCompat.VISIBILITY_PUBLIC : NotificationCompat.VISIBILITY_PRIVATE);
+        if (!pv) b.setPublicVersion(new NotificationCompat.Builder(c, CH_MSG).setSmallIcon(R.drawable.ic_stat_duna)
+                .setColor(0xFF6D4BFF).setContentTitle("DUNA").setContentText("Mensaje nuevo").build());
+        b.setDefaults(NotificationCompat.DEFAULT_ALL);
+        if (canReply) b.addAction(reply);
+        if (canReply) b.addAction(read);
+        try { NotificationManagerCompat.from(c).notify(nid, b.build()); } catch (SecurityException ignored) { }
+        if (!silent) wakeScreen(c);
     }
+
+    /** Con la pantalla apagada, la enciende unos segundos para mostrar el aviso (como WhatsApp). */
+    @SuppressWarnings("deprecation")
+    static void wakeScreen(Context c) {
+        try {
+            PowerManager pm = c.getSystemService(PowerManager.class);
+            if (pm == null || pm.isInteractive()) return;
+            PowerManager.WakeLock wl = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE, "duna:wake");
+            wl.acquire(3000);
+        } catch (Exception ignored) { }
+    }
+
+    /** Tras responder desde la notificación: se añade "Tú: …" y se actualiza sin sonar. */
+    static void ensureMeta(String chat, String title, String ct) { if (!meta.containsKey(chat)) meta.put(chat, new String[]{title == null ? "DUNA" : title, ct == null ? "direct" : ct}); }
+    static void addMyReply(Context c, String chat, String text) { addHistory(chat, "Tú", text, true); post(c, chat, true); }
+    static void replyFailed(Context c, String chat, String why) { addHistory(chat, "DUNA", "⚠️ No se envió: " + why, false); post(c, chat, true); }
 
     private static void showCall(Context c, JSONObject d, long at) {
         if (at > 0 && System.currentTimeMillis() / 1000 - at > 50) return; // ya no está sonando
@@ -158,7 +226,7 @@ final class Notifier {
     }
 
     static void clearChat(Context c, String chat) {
-        history.remove(chat);
+        history.remove(chat); meta.remove(chat);
         NotificationManagerCompat.from(c).cancel(idFor(chat));
         NotificationManagerCompat.from(c).cancel(idFor("call:" + chat));
     }

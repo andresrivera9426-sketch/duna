@@ -30,7 +30,7 @@ public class DunaNativePlugin extends Plugin {
     static JSObject pendingShare;
     static String pendingChat, pendingCall;
 
-    @Override public void load() { inst = this; }
+    @Override public void load() { inst = this; Notifier.channels(getContext()); }
 
     static void emitOpen(String chat, String call) {
         pendingChat = chat; pendingCall = call;
@@ -67,6 +67,8 @@ public class DunaNativePlugin extends Plugin {
         o.put("connected", PushService.connected);
         o.put("sdk", Build.VERSION.SDK_INT);
         o.put("version", BuildConfig.VERSION_NAME);
+        o.put("brand", Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.toLowerCase(java.util.Locale.ROOT));
+        o.put("reply", Store.reply(getContext()) != null);
         call.resolve(o);
     }
 
@@ -75,6 +77,7 @@ public class DunaNativePlugin extends Plugin {
         String url = call.getString("url"), apikey = call.getString("apikey"), topic = call.getString("topic"), key = call.getString("key"), uid = call.getString("uid");
         if (url == null || apikey == null || topic == null || key == null) { call.reject("faltan datos"); return; }
         Store.save(getContext(), url, apikey, topic, key, uid);
+        Store.setReply(getContext(), call.getString("reply"));
         Store.p(getContext()).edit().putBoolean("fcm_ready", Boolean.TRUE.equals(call.getBoolean("fcmReady", false))).apply();
         applyMode();
         call.resolve();
@@ -139,6 +142,37 @@ public class DunaNativePlugin extends Plugin {
             try { getContext().startActivity(i); } catch (Exception e) { call.reject(e.getMessage()); return; }
         }
         call.resolve();
+    }
+
+    /** Abre la pantalla de "inicio automático"/"apps protegidas" del fabricante (Xiaomi, Huawei, Oppo, Vivo, Samsung…). */
+    @PluginMethod public void openAutostart(PluginCall call) {
+        String[][] comps = {
+            {"com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"},
+            {"com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"},
+            {"com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"},
+            {"com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"},
+            {"com.oppo.safe", "com.oppo.safe.permission.startup.StartupAppListActivity"},
+            {"com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"},
+            {"com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.BgStartUpManager"},
+            {"com.samsung.android.lool", "com.samsung.android.sm.battery.ui.BatteryActivity"},
+            {"com.samsung.android.lool", "com.samsung.android.sm.ui.battery.BatteryActivity"},
+            {"com.asus.mobilemanager", "com.asus.mobilemanager.autostart.AutoStartActivity"},
+            {"com.letv.android.letvsafe", "com.letv.android.letvsafe.AutobootManageActivity"},
+        };
+        for (String[] cpt : comps) {
+            try {
+                Intent i = new Intent().setComponent(new android.content.ComponentName(cpt[0], cpt[1])).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                if (i.resolveActivityInfo(getContext().getPackageManager(), 0) != null) {
+                    getContext().startActivity(i);
+                    JSObject o = new JSObject(); o.put("opened", cpt[0]); call.resolve(o); return;
+                }
+            } catch (Exception ignored) { }
+        }
+        try {
+            Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getContext().getPackageName())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+        } catch (Exception ignored) { }
+        JSObject o = new JSObject(); o.put("opened", "app_details"); call.resolve(o);
     }
 
     @PluginMethod public void clearChat(PluginCall call) {

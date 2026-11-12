@@ -23,6 +23,8 @@ final class Store {
                 .putString("key", Sec.wrap(key)).putString("uid", uid).apply();
     }
     static boolean fcmMode(Context c) { return BuildConfig.HAS_FCM && p(c).getBoolean("fcm_ready", false) && p(c).getString("fcm_token", null) != null; }
+    static String reply(Context c) { return Sec.unwrap(p(c).getString("reply", null)); }
+    static void setReply(Context c, String secret) { if (secret != null) p(c).edit().putString("reply", Sec.wrap(secret)).apply(); }
     static void clear(Context c) { p(c).edit().clear().apply(); }
 
     static void setChatKeys(Context c, JSONObject keys, boolean preview) {

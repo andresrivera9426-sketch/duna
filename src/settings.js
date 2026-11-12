@@ -108,6 +108,13 @@ async function backup() {
   }
   download(`DUNA-copia-${new Date().toISOString().slice(0, 10)}.json`, new Blob([JSON.stringify(out, null, 1)], { type: 'application/json' }));
 }
+function brandTip(b = '') {
+  if (/xiaomi|redmi|poco/.test(b)) return 'Xiaomi/Redmi/POCO: activa “Inicio automático” para DUNA, en Batería elige “Sin restricciones” y en apps recientes mantén pulsada DUNA y toca el candado.';
+  if (/huawei|honor/.test(b)) return 'Huawei/Honor: en Batería → Inicio de apps, desactiva “Gestionar automáticamente” para DUNA y activa las tres opciones (inicio automático, inicio secundario, ejecución en segundo plano).';
+  if (/samsung/.test(b)) return 'Samsung: Ajustes → Batería → Límites de uso en segundo plano: quita DUNA de “Apps en suspensión” y “Apps en suspensión profunda”, y en la app DUNA → Batería elige “Sin restricciones”.';
+  if (/oppo|realme|oneplus|vivo|iqoo/.test(b)) return 'Oppo/Realme/OnePlus/Vivo: permite “Inicio automático” y “Actividad en segundo plano” para DUNA y en Batería elige “Sin restricciones”.';
+  return 'Si con la pantalla apagada los avisos llegan tarde: en Ajustes → Apps → DUNA → Batería elige “Sin restricciones” y no fuerces la detención de la app.';
+}
 async function nativeNotifSheet() {
   const N = await import('./native.js');
   const i = await N.nativeInfo();
@@ -116,12 +123,15 @@ async function nativeNotifSheet() {
   const pv = h('input', { type: 'checkbox', checked: S.prefs.preview !== false, onchange: e => { S.prefs.preview = e.target.checked; savePrefs(); N.syncChatKeys(); } });
   const s = sheet('Notificaciones', h('div', { class: 'form' },
     h('p', null, 'Permiso de notificaciones: ', yes(i.notifications, 'concedido', 'falta')),
-    i.fcm ? null : h('p', null, 'Segundo plano sin restricción de batería: ', yes(i.battery, 'sí', 'no (pueden llegar tarde)')),
-    h('p', { class: 'muted' }, 'Vía de entrega: ' + via + (i.fcm ? '' : i.connected ? ' · conectada' : ' · conectando…')),
-    !i.notifications || (!i.fcm && !i.battery) ? h('button', { class: 'btn primary', onclick: async () => { await N.enableNativeNotifications(); savePrefs(); s.close(); setTimeout(() => nativeNotifSheet(), 1200); } }, 'Activar notificaciones') : null,
-    h('label', { class: 'switch' }, pv, h('span', null, 'Mostrar vista previa del texto')),
+    h('p', null, 'Batería sin restricción (pantalla apagada): ', yes(i.battery, 'sí', 'no (pueden llegar tarde con la pantalla apagada)')),
+    h('p', { class: 'muted' }, 'Vía de entrega: ' + via + (i.fcm ? '' : i.connected ? ' · conectada' : ' · conectando…') + (i.reply ? ' · Responder desde la notificación: activo' : '')),
+    !i.notifications || !i.battery ? h('button', { class: 'btn primary', onclick: async () => { await N.enableNativeNotifications(); savePrefs(); s.close(); setTimeout(() => nativeNotifSheet(), 1200); } }, 'Activar notificaciones') : null,
+    h('label', { class: 'switch' }, pv, h('span', null, 'Mostrar vista previa')),
+    h('p', { class: 'fine' }, 'Con la vista previa activa verás quién escribe y el texto (también en la pantalla de bloqueo), y podrás tocar “Responder” o “Marcar como leído” sin abrir DUNA.'),
     h('button', { class: 'btn ghost', onclick: () => N.Duna.testNotification() }, 'Probar notificación'),
     h('button', { class: 'btn ghost', onclick: () => N.Duna.openSettings() }, 'Ajustes de notificaciones de Android (sonido, vibración)'),
+    h('button', { class: 'btn ghost', onclick: () => N.Duna.openAutostart() }, 'Inicio automático / apps protegidas del fabricante'),
+    h('p', { class: 'fine' }, brandTip(i.brand)),
     h('p', { class: 'fine' }, 'Cada teléfono tiene su propia clave: el servidor cifra cada aviso antes de enviarlo. En los chats 1:1 el texto viaja cifrado de extremo a extremo y solo tu teléfono lo descifra para la vista previa. Los chats silenciados no notifican.')));
 }
 function notifSheet() {
@@ -140,7 +150,7 @@ function notifSheet() {
   sheet('Notificaciones', h('div', { class: 'form' }, st,
     h('label', { class: 'switch' }, en, h('span', null, 'Notificaciones con DUNA abierta o en segundo plano')),
     h('label', { class: 'switch' }, pu, h('span', null, 'Notificaciones push con la app cerrada (mensajes y llamadas)')),
-    h('label', { class: 'switch' }, snd, h('span', null, 'Sonidos en la app')), h('label', { class: 'switch' }, pv, h('span', null, 'Mostrar vista previa del texto')),
+    h('label', { class: 'switch' }, snd, h('span', null, 'Sonidos en la app')), h('label', { class: 'switch' }, pv, h('span', null, 'Mostrar vista previa')),
     h('button', { class: 'btn ghost', onclick: () => navigator.serviceWorker?.ready.then(r => r.showNotification('DUNA', { body: 'Así se verán tus notificaciones', icon: 'icons/icon-192.png' })).catch(() => toast('No disponible')) }, 'Probar notificación'),
     h('p', { class: 'fine' }, 'Push usa el servicio de notificaciones de tu navegador (Web Push con VAPID). En los chats cifrados 1:1 el servidor solo envía el texto cifrado y tu dispositivo lo descifra para mostrar la vista previa. En iPhone/iPad funciona solo si instalas DUNA en la pantalla de inicio (iOS 16.4 o superior). Los chats silenciados no envían push.')));
 }
