@@ -4,7 +4,7 @@ export function h(tag, attrs, ...kids) {
   if (attrs) for (const [k, v] of Object.entries(attrs)) {
     if (v == null || v === false) continue;
     if (k === 'class') el.className = v;
-    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (k === 'style' && typeof v === 'object') { for (const [sk, sv] of Object.entries(v)) { if (sk.startsWith('--')) el.style.setProperty(sk, sv); else el.style[sk] = sv; } }
     else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
     else if (k === 'html') el.innerHTML = v;
     else if (k === 'dataset') Object.assign(el.dataset, v);
@@ -98,7 +98,8 @@ export function icon(name, size = 22, cls = '') {
 export const btn = (ic, label, onclick, cls = 'icon-btn') => h('button', { class: cls, type: 'button', title: label, 'aria-label': label, onclick }, icon(ic));
 
 export const LOGO = `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs><linearGradient id="dg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6D4BFF"/><stop offset=".55" stop-color="#C24BD6"/><stop offset="1" stop-color="#FF8A3D"/></linearGradient></defs><path d="M32 4C16.5 4 4 15.4 4 29.5c0 7.3 3.4 13.9 8.8 18.5L10 60l13.2-6.6c2.8.7 5.8 1.1 8.8 1.1 15.5 0 28-11.4 28-25.5S47.5 4 32 4z" fill="url(#dg)"/><circle cx="43" cy="20" r="5.2" fill="#FFE7A8"/><path d="M12 38c6-7 12-9 18-6s10 4 16-1c3-2.5 5.5-3 8-2.5-1.5 9-9 16-20 17.5-9 1.2-17.4-2.2-22-8z" fill="#fff" opacity=".95"/><path d="M15 33c5-5 10-6 15-3.5" stroke="#fff" stroke-width="3" stroke-linecap="round" fill="none" opacity=".6"/></svg>`;
-export const logo = (size = 36) => h('span', { class: 'logo', style: { width: size + 'px', height: size + 'px' }, html: LOGO });
+let logoN = 0;
+export const logo = (size = 36) => { const id = 'dg' + (++logoN); return h('span', { class: 'logo', style: { width: size + 'px', height: size + 'px' }, html: LOGO.replace('id="dg"', `id="${id}"`).replace('url(#dg)', `url(#${id})`) }); };
 
 // Toasts
 export function toast(msg, ms = 2600) {

@@ -123,7 +123,7 @@ try {
   await textIn(B, '.mrow .poll', '¿Almorzamos? ' + stamp, 15000);
   await B.evaluate(t => { const p = [...document.querySelectorAll('.mrow .poll')].find(e => e.innerText.includes(t)); p.querySelector('.poll-opt').click(); }, stamp);
   ok('Encuesta: voto de B visible para A', await A.waitForFunction(t => { const p = [...document.querySelectorAll('.mrow .poll')].find(e => e.innerText.includes(t)); return p && p.querySelector('.pn')?.innerText === '1'; }, { timeout: 15000 }, stamp).then(() => true, () => false));
-  await A.screenshot({ path: OUT + '/chat-escritorio-1366.png' }); await B.screenshot({ path: OUT + '/chat-movil-390.png' });
+  await sleep(1200); console.log('SCROLL', await A.evaluate(() => [scrollY, ...[...document.querySelectorAll('*')].filter(e => e.scrollTop > 0 && e.id !== 'msgs').map(e => (e.id || e.className) + ':' + e.scrollTop)])); await A.screenshot({ path: OUT + '/chat-escritorio-1366.png' }); await B.screenshot({ path: OUT + '/chat-movil-390.png' });
 
   // grupo
   await A.evaluate(() => document.querySelector('.conv-head [aria-label="Más opciones"]')); 
