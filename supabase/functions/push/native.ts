@@ -30,18 +30,42 @@ async function fcmAccess(sa: any) {
   const j = await r.json(); if (!j.access_token) throw new Error('fcm oauth ' + r.status);
   fcmTok = { t: j.access_token, exp: Date.now() + (j.expires_in || 3600) * 1000 }; return fcmTok.t;
 }
-async function fcmSend(sa: any, token: string, data: Record<string, string>, ttl: number) {
+const KIND: Record<string, string> = { image: '📷 Foto', video: '🎬 Video', audio: '🎵 Audio', voice: '🎤 Nota de voz', document: '📄 Documento', location: '📍 Ubicación', contact: '👤 Contacto', poll: '📊 Encuesta', sticker: '✨ Sticker', gif: 'GIF' };
+/** Texto visible de la notificación: genérico (el contenido 1:1 va cifrado de extremo a extremo). */
+export function visibleText(p: any) {
+  const group = p.ct && p.ct !== 'direct';
+  if (p.t === 'call') return { title: p.title || 'DUNA', body: (p.kind === 'video' ? '📹 Videollamada entrante' : '📞 Llamada entrante') + (group ? ' · ' + (p.from || '') : ''), channel: 'duna_calls' };
+  const what = p.vo ? '① Archivo de una vista' : (KIND[p.kind] || 'Mensaje nuevo');
+  return { title: p.title || 'DUNA', body: group ? `${p.from || ''}: ${what}` : what, channel: 'duna_msgs' };
+}
+export async function fcmSend(sa: any, token: string, data: Record<string, string>, ttl: number, p: any) {
+  const v = visibleText(p);
+  const tag = (p.t === 'call' ? 'call:' : '') + (p.chat || 'duna');
+  // Solo "data" (prioridad alta): Android entrega el mensaje a DunaFcmService aunque la app esté cerrada,
+  // y el teléfono descifra y arma la notificación con vista previa, Responder y Marcar como leído.
+  // (Un bloque "notification" lo mostraría el sistema sin pasar por la app: sin vista previa ni respuesta.)
+  const message = {
+    token,
+    data: { ...data, duna_chat: String(p.chat || ''), ...(p.call ? { duna_call: String(p.call) } : {}) },
+    android: { priority: 'HIGH', ttl: ttl + 's' },
+    apns: { headers: { 'apns-priority': '10' }, payload: { aps: { 'content-available': 1, 'mutable-content': 1, alert: { title: v.title, body: v.body }, sound: 'default' } } },
+  };
   const r = await fetch(`https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`, { method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await fcmAccess(sa) },
-    body: JSON.stringify({ message: { token, data, android: { priority: 'HIGH', ttl: ttl + 's' }, apns: { headers: { 'apns-priority': '10' }, payload: { aps: { 'content-available': 1, 'mutable-content': 1, alert: { title: 'DUNA', body: 'Nuevo mensaje' } } } } } }) });
-  return r.status;
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await fcmAccess(sa) }, body: JSON.stringify({ message }) });
+  const j = await r.json().catch(() => ({}));
+  return { status: r.status, name: j?.name ? String(j.name).split('/').pop() : null, error: j?.error?.status || null, code: (j?.error?.details || []).map((d: any) => d.errorCode).filter(Boolean).join(',') || null };
 }
 
 export async function sendNative(sb: any, cfg: Record<string, string>, kind: string, id: string) {
   const { data: targets, error } = await sb.rpc('native_targets', { p_kind: kind, p_id: id });
   if (error) return { error: error.message };
   if (!targets?.length) return { native: 0 };
-  const sealed = await Promise.all(targets.map(async (t: any) => ({ t, data: await seal(t.key, t.payload) })));
+  // FCM admite ~4 KB de datos: si el mensaje cifrado es muy largo, se envía sin el texto (el teléfono muestra "Mensaje nuevo")
+  const sealed = await Promise.all(targets.map(async (t: any) => {
+    let data = await seal(t.key, t.payload);
+    if (data.ct.length > 3300) { const { enc: _e, body: _b, ...rest } = t.payload; data = await seal(t.key, { ...rest, big: true }); }
+    return { t, data };
+  }));
   const { data: q, error: qe } = await sb.rpc('native_enqueue', { p_items: sealed.map(s => ({ device: s.t.device_id, data: s.data })) });
   const ids = new Map<string, number>(); if (!qe) for (const r of q || []) ids.set(r.device_id, r.id);
   const msgs = sealed.map(s => ({ topic: 'duna-push:' + s.t.topic, event: 'push', private: false, payload: { id: ids.get(s.t.device_id) || 0, ...s.data } }));
@@ -54,10 +78,10 @@ export async function sendNative(sb: any, cfg: Record<string, string>, kind: str
   if (sa && withFcm.length) {
     out.fcm = await Promise.all(withFcm.map(async s => {
       try {
-        const st = await fcmSend(sa, s.t.fcm_token, { id: String(ids.get(s.t.device_id) || 0), v: '1', iv: s.data.iv, ct: s.data.ct }, kind === 'call' ? 45 : 86400);
-        if (st === 404 || st === 400) await sb.rpc('native_fcm_gone', { p_device: s.t.device_id });
-        return st;
-      } catch (_e) { return 0; }
+        const r = await fcmSend(sa, s.t.fcm_token, { id: String(ids.get(s.t.device_id) || 0), v: '1', iv: s.data.iv, ct: s.data.ct }, kind === 'call' ? 45 : 86400, s.t.payload);
+        if (r.status === 404 || r.code === 'UNREGISTERED') await sb.rpc('native_fcm_gone', { p_device: s.t.device_id });
+        return r;
+      } catch (_e) { return { status: 0 }; }
     }));
   } else if (withFcm.length) out.fcm = 'sin cuenta de servicio';
   return out;
@@ -76,4 +100,12 @@ export async function fcmCheck(cfg: Record<string, string>) {
   out.send_status = r.status; out.send_error = j?.error?.status || null;
   out.fcm_error_code = (j?.error?.details || []).map((d: any) => d.errorCode).filter(Boolean).join(',') || null;
   return out;
+}
+
+/** Prueba real a un dispositivo (por id de native_devices); devuelve solo el estado y el nombre del mensaje de Google. */
+export async function fcmTest(sb: any, cfg: Record<string, string>, deviceId: string) {
+  let sa: any = null; try { sa = JSON.parse(cfg.fcm_sa || ''); } catch { return { sa: 'no configurada' }; }
+  const { data } = await sb.from('native_devices').select('fcm_token').eq('id', deviceId).maybeSingle();
+  if (!data?.fcm_token) return { device: 'sin token FCM' };
+  return await fcmSend(sa, data.fcm_token, { t: 'test' }, 600, { t: 'msg', ct: 'direct', title: 'DUNA', kind: 'text', chat: '' });
 }

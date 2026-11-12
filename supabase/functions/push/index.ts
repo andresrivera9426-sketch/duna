@@ -1,7 +1,7 @@
 // DUNA · envío de notificaciones push (disparado por la base de datos vía pg_net)
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { sendPush } from './webpush.js';
-import { sendNative, fcmCheck } from './native.ts';
+import { sendNative, fcmCheck, fcmTest } from './native.ts';
 
 const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
 let cfg: Record<string, string> | null = null;
@@ -13,6 +13,7 @@ Deno.serve(async (req) => {
   if (!cfg?.push_secret || req.headers.get('x-duna-secret') !== cfg.push_secret) return json({ error: 'no autorizado' }, 401);
   const { kind, id } = await req.json().catch(() => ({}));
   if (kind === 'fcmcheck') return json(await fcmCheck(cfg!));
+  if (kind === 'fcmtest' && typeof id === 'string') return json(await fcmTest(sb, cfg!, id));
   if (!['msg', 'call'].includes(kind) || typeof id !== 'string') return json({ error: 'datos' }, 400);
   const nativeP = sendNative(sb, cfg!, kind, id).catch((e: Error) => ({ error: String(e?.message || e) }));
   const { data: targets, error } = await sb.rpc('push_targets', { p_kind: kind, p_id: id });
