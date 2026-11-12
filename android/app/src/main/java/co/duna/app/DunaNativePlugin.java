@@ -137,40 +137,18 @@ public class DunaNativePlugin extends Plugin {
     /** Pide no restringir la batería (necesario solo para la vía propia sin FCM). */
     @PluginMethod public void requestBattery(PluginCall call) {
         if (!batteryExempt() && Build.VERSION.SDK_INT >= 23) {
-            Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getContext().getPackageName()));
+            // Lista general de optimización de batería (no requiere el permiso REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+            Intent i = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             try { getContext().startActivity(i); } catch (Exception e) { call.reject(e.getMessage()); return; }
         }
         call.resolve();
     }
 
-    /** Abre la pantalla de "inicio automático"/"apps protegidas" del fabricante (Xiaomi, Huawei, Oppo, Vivo, Samsung…). */
+    /** Abre la ficha de DUNA en Ajustes (batería, inicio automático, notificaciones): sin tocar apps de terceros. */
     @PluginMethod public void openAutostart(PluginCall call) {
-        String[][] comps = {
-            {"com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"},
-            {"com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"},
-            {"com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"},
-            {"com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"},
-            {"com.oppo.safe", "com.oppo.safe.permission.startup.StartupAppListActivity"},
-            {"com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"},
-            {"com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.BgStartUpManager"},
-            {"com.samsung.android.lool", "com.samsung.android.sm.battery.ui.BatteryActivity"},
-            {"com.samsung.android.lool", "com.samsung.android.sm.ui.battery.BatteryActivity"},
-            {"com.asus.mobilemanager", "com.asus.mobilemanager.autostart.AutoStartActivity"},
-            {"com.letv.android.letvsafe", "com.letv.android.letvsafe.AutobootManageActivity"},
-        };
-        for (String[] cpt : comps) {
-            try {
-                Intent i = new Intent().setComponent(new android.content.ComponentName(cpt[0], cpt[1])).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                if (i.resolveActivityInfo(getContext().getPackageManager(), 0) != null) {
-                    getContext().startActivity(i);
-                    JSObject o = new JSObject(); o.put("opened", cpt[0]); call.resolve(o); return;
-                }
-            } catch (Exception ignored) { }
-        }
         try {
-            Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getContext().getPackageName())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            getContext().startActivity(i);
+            getContext().startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getContext().getPackageName())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         } catch (Exception ignored) { }
         JSObject o = new JSObject(); o.put("opened", "app_details"); call.resolve(o);
     }

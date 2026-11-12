@@ -8,7 +8,6 @@ import android.content.Intent;
 import android.media.AudioAttributes;
 import android.media.RingtoneManager;
 import android.os.Build;
-import android.os.PowerManager;
 import android.app.Notification;
 
 import androidx.core.app.NotificationCompat;
@@ -181,18 +180,6 @@ final class Notifier {
         if (canReply) b.addAction(reply);
         if (canReply) b.addAction(read);
         try { NotificationManagerCompat.from(c).notify(nid, b.build()); } catch (SecurityException ignored) { }
-        if (!silent) wakeScreen(c);
-    }
-
-    /** Con la pantalla apagada, la enciende unos segundos para mostrar el aviso (como WhatsApp). */
-    @SuppressWarnings("deprecation")
-    static void wakeScreen(Context c) {
-        try {
-            PowerManager pm = c.getSystemService(PowerManager.class);
-            if (pm == null || pm.isInteractive()) return;
-            PowerManager.WakeLock wl = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE, "duna:wake");
-            wl.acquire(3000);
-        } catch (Exception ignored) { }
     }
 
     /** Tras responder desde la notificación: se añade "Tú: …" y se actualiza sin sonar. */
