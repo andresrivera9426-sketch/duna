@@ -56,6 +56,6 @@ await pa.evaluate(() => document.querySelector('#call-hang, [aria-label="Colgar"
 const ended = await pb.evaluate(() => !window.__duna.call); ok('Colgar termina la llamada en B', ended);
 const st2 = await sbB.from('calls').select('status, answered_at').order('created_at', { ascending: false }).limit(1).single();
 ok('Fila de la llamada: contestada y finalizada', st2.data?.answered_at && ['ended', 'missed'].includes(st2.data.status), JSON.stringify(st2.data));
-const { data: iceS, error: iceE } = await sbB.rpc('ice_servers'); ok('RPC ice_servers responde (TURN aún sin configurar)', !iceE && Array.isArray(iceS), JSON.stringify(iceS));
+const { data: iceS, error: iceE } = await sbB.rpc('ice_servers'); ok('RPC ice_servers responde', !iceE && Array.isArray(iceS), (iceS || []).length + ' servidores, TURN: ' + ((iceS || []).some(s => [].concat(s.urls).some(u => /^turns?:/.test(u))) ? 'sí' : 'no')); // nunca imprimir credenciales
 const log = await pa.evaluate(() => window.__duna.callLog.slice(-8)); console.log('log A:', log.join(' | '));
 await anon.removeAllChannels(); await br.close(); process.exit(0);
