@@ -8,6 +8,7 @@ import { STICKERS, stickerUrl, EMOJI, recentEmoji } from './stickers.js';
 import { gifUrl, searchGifs } from './gifs.js';
 import { avatar } from './main.js';
 import { QUICK_REPLIES, scheduleSheet } from './extras.js';
+import { iaMention, iaConsent, iaReplyInChat, iaSuggest, iaAvatar } from './ia.js';
 
 let reply = null, editing = null, ta = null, rec = null;
 export function composer(c) {
@@ -54,7 +55,10 @@ export function composer(c) {
     const r = reply; clearExtra(); ta.value = ''; ta.style.height = 'auto'; updateBtn(); saveDraft(c.id, '');
     const meta = r ? { rq: { sender_id: r.sender_id, kind: r.kind, body: (r.body || '').slice(0, 200) } } : null;
     const lp = await linkPreview(text);
-    try { await sendMessage(c.id, { kind: 'text', body: text, reply_to: r?.id || null, meta: lp ? { ...(meta || {}), lp } : meta }); } catch (e) { toast('No se envió: ' + e.message); }
+    const wantIA = iaMention(text) && await iaConsent();
+    let sent = null;
+    try { sent = await sendMessage(c.id, { kind: 'text', body: text, reply_to: r?.id || null, meta: lp ? { ...(meta || {}), lp } : meta }); } catch (e) { toast('No se envió: ' + e.message); }
+    if (sent && wantIA) iaReplyInChat(c, sent);
   };
   sendB.addEventListener('click', () => { if (ta.value.trim() || editing) submit(); else startVoice(c, wrap); });
   const schedMenu = e => { e.preventDefault(); if (editing) return; menu([{ icon: 'calendar', label: 'Programar mensaje', action: () => scheduleSheet(c, ta.value.trim(), reply) }], sendB); };
@@ -64,10 +68,24 @@ export function composer(c) {
   const emojiB = btn('smile', 'Emojis, stickers y GIF', () => { panel.hidden = !panel.hidden; if (!panel.hidden) drawPanel(panel, c); });
   const attachB = btn('clip', 'Adjuntar', e => attachMenu(c, e.currentTarget));
   const camB = btn('camera', 'Cámara', () => pickFiles('image/*,video/*', true));
-  wrap.append(panel, mention, extra, h('div', { class: 'comp-row' }, h('div', { class: 'comp-box' }, emojiB, ta, attachB, camB), sendB));
+  const iaB = btn('sparkle', 'Sugerir respuestas con IA DUNA', () => showSuggestions(c)); iaB.classList.add('ia-btn');
+  const sugBox = h('div', { id: 'ia-sugbox' });
+  wrap.append(panel, mention, sugBox, extra, h('div', { class: 'comp-row' }, h('div', { class: 'comp-box' }, emojiB, ta, iaB, attachB, camB), sendB));
   const draft = localStorage.getItem('duna-draft:' + c.id); if (draft) { ta.value = draft; setTimeout(() => ta.dispatchEvent(new Event('input')), 0); }
   updateBtn();
   return wrap;
+}
+// Sugerencias de respuesta de IA DUNA (no se guardan; tocar una la pone en el cuadro de texto)
+export async function showSuggestions(c) {
+  const x = $('#ia-sugbox'); if (!x || !ta) return;
+  x.innerHTML = ''; const box = h('div', { class: 'ia-sugs' }, iaAvatar(22), h('span', { class: 'ia-dots' }, h('i'), h('i'), h('i')), btn('x', 'Cerrar sugerencias', () => { x.innerHTML = ''; }));
+  x.append(box);
+  try {
+    const arr = await iaSuggest(c); if (!arr) { x.innerHTML = ''; return; }
+    if (!box.isConnected) return;
+    box.innerHTML = ''; box.append(iaAvatar(22), ...arr.map(s => h('button', { class: 'chip ia-sug', onclick: () => { ta.value = s; x.innerHTML = ''; ta.focus(); ta.dispatchEvent(new Event('input')); } }, s)), btn('x', 'Cerrar sugerencias', () => { x.innerHTML = ''; }));
+    if (!arr.length) { x.innerHTML = ''; toast('IA DUNA no tiene sugerencias ahora'); }
+  } catch (e) { x.innerHTML = ''; toast(e.message); }
 }
 const saveDraft = debounce((id, v) => v ? localStorage.setItem('duna-draft:' + id, v) : localStorage.removeItem('duna-draft:' + id), 400);
 function clearExtra() { reply = null; editing = null; const x = $('#comp-extra'); if (x) x.innerHTML = ''; }
@@ -90,12 +108,13 @@ function quickCheck(pop) {
   return arr.length > 0;
 }
 function mentionCheck(c, pop) {
-  if (c.type === 'direct') return;
   const before = ta.value.slice(0, ta.selectionStart); const mm = before.match(/@([a-z0-9_.]*)$/i);
   if (!mm) { pop.hidden = true; return; }
   const q = mm[1].toLowerCase();
-  const mem = [...(S.members.get(c.id)?.keys() || [])].filter(u => u !== S.user.id).map(u => S.profiles.get(u)).filter(p => p && (p.username.includes(q) || p.display_name.toLowerCase().includes(q))).slice(0, 6);
-  pop.innerHTML = ''; pop.hidden = !mem.length;
+  const iaOpt = 'ia'.startsWith(q) || 'ia duna'.startsWith(q);
+  const mem = c.type === 'direct' ? [] : [...(S.members.get(c.id)?.keys() || [])].filter(u => u !== S.user.id).map(u => S.profiles.get(u)).filter(p => p && (p.username.includes(q) || p.display_name.toLowerCase().includes(q))).slice(0, 6);
+  pop.innerHTML = ''; pop.hidden = !mem.length && !iaOpt;
+  if (iaOpt) pop.append(h('button', { class: 'ia-mention', onclick: () => { const pos = ta.selectionStart; ta.value = before.replace(/@([a-z0-9_.]*)$/i, '@IA ') + ta.value.slice(pos); pop.hidden = true; ta.focus(); ta.dispatchEvent(new Event('input')); } }, iaAvatar(28), h('b', null, 'IA DUNA'), h('small', null, '@IA · responde en el chat')));
   for (const p of mem) pop.append(h('button', { onclick: () => { const pos = ta.selectionStart; ta.value = before.replace(/@([a-z0-9_.]*)$/i, '@' + p.username + ' ') + ta.value.slice(pos); pop.hidden = true; ta.focus(); ta.dispatchEvent(new Event('input')); } }, avatar(p, 28), h('b', null, p.display_name), h('small', null, '@' + p.username)));
 }
 

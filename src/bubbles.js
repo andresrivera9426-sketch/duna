@@ -5,6 +5,7 @@ import { mediaUrl } from './media.js';
 import { stickerUrl } from './stickers.js';
 import { gifUrl } from './gifs.js';
 import { avatar, ticks } from './main.js';
+import { iaBody } from './ia.js';
 
 // ===== Reproductor de audio único (no se interrumpe al redibujar) =====
 export const player = { audio: new Audio(), id: null, rate: 1 };
@@ -166,7 +167,7 @@ export function msgSig(m) {
   const r = S.reactions.get(m.id); const v = S.votes.get(m.id);
   return [m.id, m.body, m.edited_at, m.deleted_for_all, m._pending, m._failed, m._err, JSON.stringify(m.meta)?.length, m.media?.path, m.media?.thumb?.length,
     r ? [...r.values()].join('') : '', v ? v.map(x => x.user_id + x.option_idx).join() : '', m.sender_id === S.user.id ? String(m._tick) : '',
-    S.stars.has(m.id), (S.pins.get(m.chat_id) || []).includes(m.id), S.vo.has(m.id), m.reply_to ? (findMsg(m.chat_id, m.reply_to)?.body || '') : '', S.profiles.get(m.sender_id)?.display_name].join('|');
+    S.stars.has(m.id), (S.pins.get(m.chat_id) || []).includes(m.id), S.vo.has(m.id), S.tr?.get(m.id) || '', m.reply_to ? (findMsg(m.chat_id, m.reply_to)?.body || '') : '', S.profiles.get(m.sender_id)?.display_name].join('|');
 }
 
 // ===== Burbuja =====
@@ -175,6 +176,8 @@ export function bubble(m, { group, first, onAction, scrollTo }) {
   const mine = m.sender_id === S.user.id;
   const reacts = S.reactions.get(m.id);
   const content = [];
+  const ai = !!m.meta?.ai && !m.deleted_for_all && !m._err; // respuesta de IA DUNA (pedida con @IA)
+  const body = ai ? iaBody(m) : m.body;
   if (m.forwarded) content.push(h('div', { class: 'fwd' }, icon('forward', 14), m.meta?.fwd_many ? 'Reenviado muchas veces' : 'Reenviado'));
   if (m.meta?.story) content.push(h('div', { class: 'quote story' }, h('div', null, h('b', null, 'Estado'), h('span', null, m.meta.story.text || 'Foto/Video')), m.meta.story.thumb ? h('img', { src: m.meta.story.thumb, alt: '' }) : null));
   if (m.reply_to && !m.deleted_for_all) content.push(quoteBlock(findMsg(m.chat_id, m.reply_to) || { id: m.reply_to, ...(m.meta?.rq || {}) }, scrollTo));
@@ -193,14 +196,16 @@ export function bubble(m, { group, first, onAction, scrollTo }) {
     case 'sticker': content.push(h('img', { class: 'sticker', src: stickerUrl(m.meta?.id), alt: m.meta?.label || 'Sticker', width: 140, height: 140 })); cls = ' sticker-b'; break;
   }
   if (m.meta?.lp && !m.deleted_for_all) content.push(linkPreview(m.meta.lp));
-  const emojiOnly = m.kind === 'text' && onlyEmoji(m.body);
-  if (m.body && !m.deleted_for_all && m.kind !== 'poll') content.push(h('div', { class: 'txt' + (emojiOnly ? ' big' : ''), html: richText(m.body, mentionMap(m.chat_id)) }));
+  const emojiOnly = m.kind === 'text' && !ai && onlyEmoji(m.body);
+  if (body && !m.deleted_for_all && m.kind !== 'poll') content.push(h('div', { class: 'txt' + (emojiOnly ? ' big' : ''), html: richText(body, mentionMap(m.chat_id)) }));
+  const tr = S.tr?.get(m.id); if (tr && !m.deleted_for_all) content.push(h('div', { class: 'tr-block' }, h('small', null, '✨ Traducción · IA DUNA'), tr === '…' ? h('span', { class: 'ia-dots' }, h('i'), h('i'), h('i')) : h('div', { class: 'txt', html: richText(tr) })));
   if (emojiOnly) cls += ' emoji-b';
   const meta = h('span', { class: 'meta' },
     S.stars.has(m.id) ? icon('star', 12, 'mini') : null, (S.pins.get(m.chat_id) || []).includes(m.id) ? icon('pin', 12, 'mini') : null,
     m.expires_at ? icon('timer', 12, 'mini') : null, m.edited_at ? h('em', null, 'editado') : null, fmtTime(m.created_at), mine && !m.deleted_for_all ? ticks(m, 15) : null);
   content.push(meta);
-  const b = h('div', { class: 'bubble' + cls + (first ? ' first' : '') },
+  const b = h('div', { class: 'bubble' + cls + (first ? ' first' : '') + (ai ? ' ai' : '') },
+    ai ? h('b', { class: 'sender ia-label' }, '✨ IA DUNA', group || !mine ? h('small', null, ' · para ' + ((m.meta?.rq?.sender_id || m.sender_id) === S.user.id ? 'ti' : nameOf(m.meta?.rq?.sender_id || m.sender_id))) : null) :
     group && !mine && first ? h('b', { class: 'sender', style: { color: `hsl(${hueOf(m.sender_id || 'x')} 65% var(--name-l))` } }, nameOf(m.sender_id)) : null,
     content,
     h('button', { class: 'b-more', 'aria-label': 'Opciones del mensaje', onclick: e => { e.stopPropagation(); onAction(m, e.currentTarget); } }, icon('back', 16)));

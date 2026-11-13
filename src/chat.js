@@ -8,6 +8,7 @@ import { openInfo } from './info.js';
 import { startCall } from './calls.js';
 import { QUICK, EMOJI, recentEmoji } from './stickers.js';
 import { mediaBlob, uploadToChat, forgetUrl } from './media.js';
+import { iaSummary, iaTranslate, iaBody } from './ia.js';
 
 let typingCh = null, nodeCache = new Map(), loadingOlder = false, searchState = null, pinIdx = 0;
 export const WALLPAPERS = { arena: 'Arena', noche: 'Noche', oasis: 'Oasis', aurora: 'Aurora', lineas: 'Líneas', liso: 'Liso' };
@@ -107,6 +108,8 @@ function chatMenu(c, anchor) {
   menu([
     { icon: 'info', label: c.type === 'direct' ? 'Info. del contacto' : c.type === 'channel' ? 'Info. del canal' : 'Info. del grupo', action: () => openInfo(c.id) },
     { icon: 'search', label: 'Buscar', action: () => openSearch() },
+    { icon: 'sparkle', label: 'Resumir con IA DUNA', action: () => iaSummary(c) },
+    c.type !== 'channel' || ['owner', 'admin'].includes(c.my_role) ? { icon: 'sparkle', label: 'Sugerir respuestas (IA DUNA)', action: () => import('./composer.js').then(x => x.showSuggestions(c)) } : null,
     { icon: muted ? 'bell' : 'belloff', label: muted ? 'Activar notificaciones' : 'Silenciar notificaciones', action: () => muteMenu(c, anchor) },
     { icon: 'timer', label: 'Mensajes temporales', action: () => disappearingSheet(c) },
     { icon: 'wallpaper', label: 'Fondo de pantalla', action: () => wallpaperSheet(c) },
@@ -257,12 +260,13 @@ export function msgAction(m, anchor, direct) {
   if (m._pending) return;
   const canPin = c.type === 'direct' || !c.only_admins_edit || ['owner', 'admin'].includes(c.my_role);
   const pinned = (S.pins.get(m.chat_id) || []).includes(m.id);
-  const canEdit = mine && !m.deleted_for_all && ['text', 'image', 'video', 'document', 'gif'].includes(m.kind) && Date.now() - new Date(m.created_at) < 15 * 60e3 && !m.view_once;
+  const canEdit = mine && !m.deleted_for_all && ['text', 'image', 'video', 'document', 'gif'].includes(m.kind) && Date.now() - new Date(m.created_at) < 15 * 60e3 && !m.view_once && !m.meta?.ai;
   const canDelAll = !m.deleted_for_all && ((mine && Date.now() - new Date(m.created_at) < 48 * 36e5) || (c.type !== 'direct' && ['owner', 'admin'].includes(c.my_role)));
   const m2 = menu([
     !m.deleted_for_all ? { icon: 'smile', label: 'Reaccionar', action: () => reactPicker(m, anchor) } : null,
     !m.deleted_for_all && (!c.only_admins_send || ['owner', 'admin'].includes(c.my_role)) ? { icon: 'reply', label: 'Responder', action: () => setReply(m) } : null,
-    m.body && !m.deleted_for_all ? { icon: 'copy', label: 'Copiar', action: () => copyText(m.body) } : null,
+    m.body && !m.deleted_for_all ? { icon: 'copy', label: 'Copiar', action: () => copyText(m.meta?.ai ? iaBody(m) : m.body) } : null,
+    m.body && !m.deleted_for_all && !m._err ? (S.tr?.has(m.id) ? { icon: 'globe', label: 'Ocultar traducción', action: () => { S.tr.delete(m.id); emit('rerender'); } } : { icon: 'globe', label: 'Traducir con IA DUNA', action: () => iaTranslate(m) }) : null,
     !m.deleted_for_all && !m.view_once && m.kind !== 'system' ? { icon: 'forward', label: 'Reenviar', action: () => forwardSheet([m]) } : null,
     !m.deleted_for_all ? { icon: 'star', label: S.stars.has(m.id) ? 'Quitar destacado' : 'Destacar', action: () => toggleStar(m) } : null,
     !m.deleted_for_all && canPin ? { icon: 'pin', label: pinned ? 'Desfijar' : 'Fijar', action: () => togglePin(m, pinned) } : null,

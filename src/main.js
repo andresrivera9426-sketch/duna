@@ -10,6 +10,7 @@ import { renderCommunities } from './communities.js';
 import { renderCalls, onCallEvent, initCalls } from './calls.js';
 import { openSettings, applyTheme, cleanupOrphans } from './settings.js';
 import { cleanupMine } from './chat.js';
+import { IA_ID, iaAvatar, iaRowPreview, openIA, iaInitPreview } from './ia.js';
 import { isNative, nativeEarly, nativeStart, syncChatKeys, unregisterDevice, nativeInfo, enableNativeNotifications } from './native.js';
 
 export function avatar(p, size = 46, extra = {}) {
@@ -115,6 +116,10 @@ function renderList(listEl) {
   else if (archived.length && !q) listEl.append(h('button', { class: 'archived-row', onclick: () => { showArchived = true; renderList(); } }, icon('archive', 18), h('span', null, 'Archivados'), h('b', null, archived.length)));
   if (!chats.length) listEl.append(h('div', { class: 'list-empty' }, q ? 'Sin resultados' : filter === 'all' ? h('div', null, h('p', null, 'Aún no tienes chats.'), h('button', { class: 'btn primary', onclick: () => newChatSheet() }, 'Empezar un chat')) : 'Nada por aquí'));
   const pb = pushBanner(); if (pb && !q) listEl.prepend(pb);
+  if (!showArchived && (filter === 'all' || filter === 'fav') && (!q || 'ia duna asistente'.includes(q) || iaRowPreview().toLowerCase().includes(q))) {
+    const e = listEl.querySelector('.list-empty'); if (e && !q) e.remove();
+    listEl.insertBefore(iaRow(), pb && !q ? pb.nextSibling : listEl.querySelector('.chat-row'));
+  }
   for (const c of chats) listEl.append(chatRow(c));
 }
 function pushBanner() {
@@ -134,6 +139,16 @@ function pushBanner() {
     h('button', { class: 'icon-btn', 'aria-label': 'Ocultar', onclick: () => { S.prefs.pushBannerOff = true; savePrefs(); renderList(); } }, icon('x', 18)));
 }
 function usedLabels() { const set = new Set(); for (const c of S.chats.values()) (c.labels || []).forEach(l => set.add(l)); return [...set].sort(); }
+// Fila fija de IA DUNA (asistente con IA), siempre arriba de la lista
+function iaRow() {
+  const l = S.iaLast; const typing = S.typing.get(IA_ID);
+  return h('div', { class: 'chat-row ia-row' + (S.current === IA_ID ? ' active' : ''), role: 'listitem', tabindex: 0, dataset: { chat: IA_ID },
+    onclick: () => openIA(), onkeydown: e => e.key === 'Enter' && openIA() },
+    iaAvatar(50),
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-top' }, h('span', { class: 'title' }, 'IA DUNA', h('span', { class: 'ia-tag' }, 'IA')), h('span', { class: 'time' }, l ? fmtListTime(l.at) : '')),
+      h('div', { class: 'row-bot' }, typing ? h('span', { class: 'typing-txt' }, typing) : h('span', { class: 'prev' }, iaRowPreview()), h('span', { class: 'flags' }, icon('pin', 15)))));
+}
 function chatRow(c) {
   const m = c.last_message;
   const typing = S.typing.get(c.id);
@@ -332,6 +347,7 @@ async function start() {
   on('profiles', debounce(() => { if (S.tab === 'chats') renderList(); }, 80));
   on('typing', () => S.tab === 'chats' && renderList());
   markDeliveredAll();
+  iaInitPreview().catch(() => {});
   heartbeat(); setInterval(heartbeat, 30000);
   setInterval(() => { if (document.visibilityState === 'visible') refreshPresence(); }, 25000);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { heartbeat(); resync('visible'); import('./calls.js').then(m => m.checkRinging()).catch(() => {}); } });
@@ -377,6 +393,7 @@ function route() {
   if ((m = hsh.match(/^#\/invitar\/(.+)$/))) { history.replaceState(null, '', location.pathname); openInvite(decodeURIComponent(m[1])); }
   else if ((m = hsh.match(/^#\/vincular\/([A-Z2-9]{10})$/))) { history.replaceState(null, '', location.pathname); import('./account.js').then(a => a.linkDeviceSheet(m[1])); }
   else if ((m = hsh.match(/^#\/u\/([a-z0-9_.]+)$/))) { history.replaceState(null, '', location.pathname); openUserLink(m[1]); }
+  else if (hsh === '#/c/' + IA_ID && S.current !== IA_ID) openIA(true);
   else if ((m = hsh.match(/^#\/c\/([0-9a-f-]{36})$/)) && S.current !== m[1] && S.chats.has(m[1])) openChat(m[1], true);
 }
 export async function logout() {
