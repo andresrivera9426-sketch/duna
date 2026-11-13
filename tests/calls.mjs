@@ -15,6 +15,10 @@ const br = await puppeteer.launch({ executablePath: '/usr/bin/google-chrome', he
 async function register(u) {
   const ctx = await br.createBrowserContext(); await ctx.overridePermissions(new globalThis.URL(URL).origin, ['microphone', 'camera', 'notifications']);
   const p = await ctx.newPage(); await p.setViewport({ width: 420, height: 820 });
+  // FORCE_RELAY=1 fuerza iceTransportPolicy 'relay'; ONLY_HOST=turn.cloudflare.com deja solo los servidores de ese host
+  if (process.env.FORCE_RELAY) await p.evaluateOnNewDocument((only) => { const O = window.RTCPeerConnection;
+    window.RTCPeerConnection = function (cfg = {}, ...r) { let ice = cfg.iceServers || []; if (only) ice = ice.map(s => ({ ...s, urls: [].concat(s.urls).filter(u => u.includes(only)) })).filter(s => s.urls.length);
+      return new O({ ...cfg, iceServers: ice, iceTransportPolicy: 'relay' }, ...r); }; window.RTCPeerConnection.prototype = O.prototype; }, process.env.ONLY_HOST || '');
   await p.goto(URL, { waitUntil: 'networkidle2' }); await p.waitForSelector('#f-user'); await p.click('#f-switch'); await p.waitForSelector('#f-name');
   await p.type('#f-user', u.u); await p.type('#f-name', u.n); await p.type('#f-pass', u.p); await p.type('#f-pass2', u.p); await p.click('#f-submit');
   await p.waitForSelector('#app', { timeout: 60000 }); await p.waitForSelector('#rc-ok', { timeout: 8000 }).then(b => b.click()).catch(() => {}); await sleep(600);
@@ -50,7 +54,7 @@ const conn = await Promise.all([pa, pb].map(p => p.waitForFunction(() => Object.
 ok('WebRTC conectado en A y B', conn.every(x => x > 0), 'desde Contestar: A ' + conn[0] + ' ms, B ' + conn[1] + ' ms');
 await sleep(2500);
 const stats = await Promise.all([pa, pb].map(p => p.evaluate(async () => { const pc = [...window.__duna.call.pcs.values()][0]; const r = await pc.getStats(); let inB = 0, pair = null; r.forEach(x => { if (x.type === 'inbound-rtp' && x.kind === 'audio') inB += x.bytesReceived; if (x.type === 'candidate-pair' && x.nominated && x.state === 'succeeded') pair = x; });
-  let lt = null; if (pair) r.forEach(x => { if (x.id === pair.localCandidateId) lt = x.candidateType; }); return { inB, lt }; })));
+  let lt = null, via = null; if (pair) r.forEach(x => { if (x.id === pair.localCandidateId) { lt = x.candidateType; if (x.url) via = x.url.replace(/^(turns?:[^:?]+:\d+).*?(\?transport=\w+)?$/, '$1$2') + ' (' + (x.relayProtocol || '?') + ')'; } }); return { inB, lt, via }; })));
 ok('Audio fluye en ambos sentidos', stats.every(s => s.inB > 1000), JSON.stringify(stats));
 await pa.evaluate(() => document.querySelector('#call-hang, [aria-label="Colgar"]')?.click()); await sleep(2500);
 const ended = await pb.evaluate(() => !window.__duna.call); ok('Colgar termina la llamada en B', ended);
