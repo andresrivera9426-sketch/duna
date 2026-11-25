@@ -1,59 +1,37 @@
-// Mide tiempos reales de DUNA (registro, inicio de sesión, arranque con sesión, abrir chat, enviar/recibir).
-// Uso: node tests/perf.mjs [url] [cpuThrottle]
-import puppeteer from 'puppeteer-core';
-import fs from 'node:fs';
-const URL = process.argv[2] || 'http://localhost:8088/'; const CPU = +(process.argv[3] || 1);
-const CREATED = '/workspace/duna-test-created.json';
-const stamp = Date.now().toString(36); const PASS = 'Duna-Prueba-2026!';
-const A = { u: 'prueba_pa_' + stamp, n: 'Ana P', p: PASS }, B = { u: 'prueba_pb_' + stamp, n: 'Beto P', p: PASS };
-const created = fs.existsSync(CREATED) ? JSON.parse(fs.readFileSync(CREATED)) : []; created.push(A, B); fs.writeFileSync(CREATED, JSON.stringify(created, null, 1));
+// Mide rendimiento real (perfil móvil: Pixel 5, CPU 4x más lenta, red 4G lenta).
+// Uso: node tests/perf.mjs <URL> [etiqueta]   → imprime JSON con medianas de 3 corridas.
+import puppeteer, { KnownDevices } from 'puppeteer-core';
+const BASE = process.argv[2] || 'http://localhost:8088/', TAG = process.argv[3] || '';
+const U = process.env.A || 'prueba_ia_a_mwehcbaf', PASS = process.env.PASS || 'Duna-Prueba-2026!';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const R = {};
-const br = await puppeteer.launch({ executablePath: '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox'] });
-async function page() { const ctx = await br.createBrowserContext(); const p = await ctx.newPage(); await p.setViewport({ width: 390, height: 800 });
-  if (CPU > 1) { const c = await p.createCDPSession(); await c.send('Emulation.setCPUThrottlingRate', { rate: CPU }); }
-  p._reqs = 0; p.on('request', r => { if (/supabase\.co/.test(r.url())) p._reqs++; }); return p; }
-const ready = p => p.waitForFunction(() => document.querySelector('#app') && window.__duna?.S?.chats && !document.querySelector('.splash'), { timeout: 90000 });
-async function register(p, u) {
-  await p.goto(URL, { waitUntil: 'networkidle2' }); await p.waitForSelector('#f-user'); await p.click('#f-switch'); await p.waitForSelector('#f-name');
-  await p.type('#f-user', u.u); await p.type('#f-name', u.n); await p.type('#f-pass', u.p); await p.type('#f-pass2', u.p);
-  const t = Date.now(); p._reqs = 0; await p.click('#f-submit'); await ready(p); return Date.now() - t;
+const med = a => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+const br = await puppeteer.launch({ executablePath: '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--enable-precise-memory-info'] });
+const runs = [];
+for (let i = 0; i < 3; i++) {
+  const ctx = await br.createBrowserContext(); const p = await ctx.newPage(); await p.emulate(KnownDevices['Pixel 5']);
+  const cdp = await p.createCDPSession(); await cdp.send('Network.enable');
+  await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 150, downloadThroughput: 1.6 * 1024 * 1024 / 8, uploadThroughput: 750 * 1024 / 8 });
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+  const bytes = { js: 0, css: 0, font: 0, other: 0 }; let count = 0;
+  const own = new URL(BASE).host;
+  cdp.on('Network.loadingFinished', e => { const r = reqs.get(e.requestId); if (!r) return; count++; const k = /\.js(\?|$)/.test(r) ? 'js' : /\.css(\?|$)/.test(r) ? 'css' : /\.woff2?(\?|$)/.test(r) ? 'font' : 'other'; bytes[k] += e.encodedDataLength; });
+  const reqs = new Map(); cdp.on('Network.requestWillBeSent', e => { if (new URL(e.request.url).host === own) reqs.set(e.requestId, e.request.url); });
+  const t0 = Date.now(); await p.goto(BASE, { waitUntil: 'domcontentloaded' }); await p.waitForSelector('#f-user', { visible: true });
+  const tLogin = Date.now() - t0; await sleep(1500);
+  const cold = { ...bytes };
+  await p.type('#f-user', U); await p.type('#f-pass', PASS);
+  const t1 = Date.now(); await p.click('#f-submit'); await p.waitForSelector('.chat-row[data-chat]:not(.ia-row)', { timeout: 90000 }); const tBoot = Date.now() - t1;
+  await sleep(4000);
+  // Arranque con sesión guardada (como abrir la app de nuevo)
+  const t2 = Date.now(); await p.reload({ waitUntil: 'domcontentloaded' }); await p.waitForSelector('.chat-row[data-chat]:not(.ia-row)', { timeout: 90000 }); const tWarm = Date.now() - t2;
+  await sleep(3000);
+  const id = await p.evaluate(() => [...window.__duna.S.chats.values()].find(c => c.type === 'group')?.id);
+  const t3 = Date.now(); await p.tap(`.chat-row[data-chat="${id}"]`); await p.waitForSelector('#msgs .bubble', { visible: true, timeout: 60000 }); const tOpen = Date.now() - t3;
+  await sleep(1500);
+  const m = await p.metrics();
+  runs.push({ tLogin, tBoot, tWarm, tOpen, heapMB: +(m.JSHeapUsedSize / 1048576).toFixed(1), nodes: m.Nodes, coldKB: Object.fromEntries(Object.entries(cold).map(([k, v]) => [k, +(v / 1024).toFixed(1)])), requests: count });
+  await ctx.close();
 }
-async function closeRecovery(p) { await p.waitForSelector('#rc-ok', { timeout: 8000 }).then(b => b.click()).catch(() => {}); await sleep(500); await p.evaluate(() => { document.querySelectorAll('.sheet-wrap').forEach(x => x.remove()); }); }
-const pa = await page(), pb = await page();
-R.registro_A_ms = await register(pa, A); await closeRecovery(pa);
-R.registro_B_ms = await register(pb, B); await closeRecovery(pb);
-// A abre chat con B y envía un primer mensaje (crea el chat 1:1)
-await pa.goto(URL + '#/u/' + B.u, { waitUntil: 'networkidle2' }); await sleep(2000);
-await pa.evaluate(() => [...document.querySelectorAll('.sheet button')].find(b => /Enviar mensaje|Chatear|Mensaje/i.test(b.innerText))?.click()); await sleep(1500);
-await pa.focus('#msg-input'); await pa.keyboard.type('hola inicial'); await pa.keyboard.press('Enter'); await sleep(3000);
-// Login en contexto nuevo (B)
-const pl = await page(); await pl.goto(URL, { waitUntil: 'networkidle2' }); await pl.waitForSelector('#f-user');
-await pl.type('#f-user', B.u); await pl.type('#f-pass', B.p);
-let t = Date.now(); pl._reqs = 0; await pl.click('#f-submit'); await ready(pl); R.login_ms = Date.now() - t; R.login_reqs = pl._reqs;
-await pl.waitForSelector('.chat-row', { timeout: 30000 }); R.login_hasta_lista_ms = Date.now() - t;
-// Arranque con sesión guardada (recarga), 3 veces
-const st = [];
-for (let i = 0; i < 3; i++) { t = Date.now(); pl._reqs = 0; await pl.reload({ waitUntil: 'domcontentloaded' }); await pl.waitForSelector('.chat-row', { timeout: 60000 }); st.push(Date.now() - t); R.arranque_reqs = pl._reqs; await sleep(1500); }
-R.arranque_con_sesion_ms = st;
-// Abrir chat
-t = Date.now(); await pl.click('.chat-row'); await pl.waitForFunction(() => [...document.querySelectorAll('.bubble')].some(b => b.innerText.includes('hola inicial')), { timeout: 30000 }); R.abrir_chat_ms = Date.now() - t;
-// Envío A -> B (pl tiene el chat abierto): 5 mensajes
-const opt = [], conf = [], recv = [];
-await pa.bringToFront();
-for (let i = 0; i < 5; i++) {
-  const txt = 'perf ' + i + ' ' + stamp;
-  await pa.focus('#msg-input'); await pa.keyboard.type(txt);
-  const t0 = Date.now();
-  const recvP = pl.waitForFunction(x => [...document.querySelectorAll('.bubble')].some(b => b.innerText.includes(x)), { timeout: 30000, polling: 20 }, txt).then(() => Date.now() - t0);
-  await pa.keyboard.press('Enter');
-  await pa.waitForFunction(x => [...document.querySelectorAll('.bubble')].some(b => b.innerText.includes(x)), { polling: 5 }, txt); opt.push(Date.now() - t0);
-  await pa.waitForFunction((x) => { const S = window.__duna.S; for (const l of S.msgs.values()) for (const m of l) if (m.body === x && !String(m.id).startsWith('tmp-')) return true; return false; }, { polling: 10, timeout: 30000 }, txt); conf.push(Date.now() - t0);
-  recv.push(await recvP.catch(() => -1)); await sleep(700);
-}
-const med = a => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)];
-R.envio_optimista_ms = opt; R.envio_confirmado_ms = conf; R.recepcion_otro_ms = recv;
-R.mediana = { optimista: med(opt), confirmado: med(conf), recepcion: med(recv) };
-R.cpu = CPU; R.url = URL;
-console.log(JSON.stringify(R, null, 1));
-await br.close(); process.exit(0);
+await br.close();
+const out = { tag: TAG, url: BASE, perfil: 'Pixel 5 · CPU 4x · 150 ms RTT · 1,6 Mbps', medianas: Object.fromEntries(['tLogin', 'tBoot', 'tWarm', 'tOpen', 'heapMB', 'nodes'].map(k => [k, med(runs.map(r => r[k]))])), coldKB: runs[0].coldKB, runs };
+console.log(JSON.stringify(out, null, 1));

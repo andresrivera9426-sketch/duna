@@ -1,5 +1,5 @@
-const V = 'duna-202611130438';
-const CORE = ['./', 'index.html', 'app.js?v=202611130438', 'styles.css?v=202611130438', 'manifest.webmanifest', 'icons/logo.svg', 'icons/icon-192.png'];
+const V = 'duna-202611251721';
+const CORE = ['./', 'index.html', 'app.js?v=202611251721', 'styles.css?v=202611251721', 'manifest.webmanifest', 'icons/logo.svg', 'icons/icon-192.png', 'fonts/jakarta-latin.woff2', ...["c/settings-T7RVLXOC.js","c/info-YK4Q7YRW.js","c/chat-QFZHYAOE.js","c/ia-ZBTRP4ED.js","c/reader-XEBRB47I.js","c/stories-7JEZZB64.js","c/web-EBPM2LXA.js","c/calls-GOSIBNML.js","c/native-FQLZQAX3.js","c/media-2SSUXN6U.js","c/communities-OAQYG73L.js","c/newchat-6MZUDOTZ.js","c/extras-4XPOTCHA.js","c/composer-WYPUJ2RK.js","c/chunk-27Z2KC4Z.js","c/chunk-SLV5G32N.js","c/chunk-MMIJNJXZ.js","c/chunk-VIEPTKDZ.js","c/chunk-YMXKUZ7M.js","c/chunk-Z75L35ZP.js","c/ui-3TTSAQRH.js","c/crypto-XXIQRNSM.js","c/state-4X75M4UU.js","c/account-OSJUXSXE.js","c/chunk-JR5TL6AD.js","c/chunk-6D435ZAQ.js","c/chunk-ORLN4MCX.js","c/chunk-77V2J4KH.js","c/web-3CLS34HD.js","c/web-QM32NHB7.js","c/web-2AO6GEOO.js","c/chunk-7DQ4MLZW.js","c/chunk-OBDVASP3.js"]];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(CORE)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {

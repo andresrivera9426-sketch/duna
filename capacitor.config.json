@@ -2,12 +2,12 @@
   "appId": "co.duna.app",
   "appName": "DUNA",
   "webDir": "docs",
-  "android": { "allowMixedContent": false, "backgroundColor": "#FBF6EF" },
-  "ios": { "contentInset": "never", "backgroundColor": "#FBF6EF" },
+  "android": { "allowMixedContent": false, "backgroundColor": "#F5F1EA" },
+  "ios": { "contentInset": "never", "backgroundColor": "#F5F1EA" },
   "plugins": {
-    "SplashScreen": { "launchShowDuration": 900, "launchAutoHide": true, "backgroundColor": "#FBF6EF", "androidScaleType": "CENTER_CROP", "showSpinner": false },
+    "SplashScreen": { "launchShowDuration": 900, "launchAutoHide": true, "backgroundColor": "#F5F1EA", "androidScaleType": "CENTER_CROP", "showSpinner": false },
     "Keyboard": { "resize": "native", "resizeOnFullScreen": true },
-    "StatusBar": { "overlaysWebView": false, "style": "LIGHT", "backgroundColor": "#FBF6EF" },
+    "StatusBar": { "overlaysWebView": false, "style": "LIGHT", "backgroundColor": "#F5F1EA" },
     "PushNotifications": { "presentationOptions": ["badge", "sound", "alert"] }
   }
 }

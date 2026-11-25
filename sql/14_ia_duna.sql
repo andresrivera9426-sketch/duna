@@ -12,7 +12,7 @@ alter table private.ia_usage enable row level security;
 
 create or replace function public.ia_config() returns jsonb
 language sql stable security definer set search_path = '' as $$
-  select coalesce(jsonb_object_agg(k, v), '{}'::jsonb) from private.app_config where k in ('fcm_sa','ia_key','ia_model','ia_limits')
+  select coalesce(jsonb_object_agg(k, v), '{}'::jsonb) from private.app_config where k = 'fcm_sa' or k like 'ia\_%'
 $$;
 
 -- Reserva una consulta: límite por minuto y por día por usuario, y tope global diario (para no salir de la cuota gratis).

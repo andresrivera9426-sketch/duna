@@ -1,0 +1,50 @@
+// E2E del rediseño v3 (móvil): navegación Chats/Descubrir/Llamadas/IA/Perfil, accesos rápidos, visor integrado
+// (los enlaces NO salen de la app), menú de IA en el redactor y documentos en IA DUNA.
+import puppeteer, { KnownDevices } from 'puppeteer-core';
+const BASE = process.argv[2] || 'http://localhost:8088/';
+const U = process.env.A || 'prueba_ia_a_mwehcbaf', PASS = process.env.PASS || 'Duna-Prueba-2026!';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let fails = 0; const ok = (c, m) => { console.log((c ? '✔ ' : '✘ ') + m); if (!c) fails++; };
+const br = await puppeteer.launch({ executablePath: '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox'] });
+let popups = 0; br.on('targetcreated', t => { if (t.type() === 'page') popups++; });
+const p = await br.newPage(); await p.emulate(KnownDevices['Pixel 5']); popups = 0;
+const errs = []; p.on('pageerror', e => errs.push(e.message));
+await p.goto(BASE, { waitUntil: 'networkidle2' }); await p.type('#f-user', U); await p.type('#f-pass', PASS); await p.click('#f-submit');
+await p.waitForSelector('.chat-row[data-chat]:not(.ia-row)', { timeout: 60000 }); await sleep(1200);
+await p.evaluate(() => document.querySelectorAll('.sheet-wrap').forEach(x => x.remove()));
+const navs = await p.evaluate(() => [...document.querySelectorAll('.tabs .tab')].map(t => t.dataset.nav));
+ok(navs.join() === 'chats,discover,calls,ia,me', 'Barra inferior: ' + navs.join(' · '));
+ok(await p.evaluate(() => document.querySelectorAll('.quick .qa').length >= 4), 'Accesos rápidos visibles');
+ok(await p.evaluate(() => !!document.querySelector('.sec-label')), 'Lista con secciones Fijados/Recientes');
+await p.tap('.tabs [data-nav="discover"]'); await sleep(1500);
+ok(await p.evaluate(() => document.querySelector('.side-head h1')?.textContent === 'Descubrir' && document.querySelectorAll('.modules .mod').length >= 5), 'Descubrir con módulos (Novedades, Comunidades y próximos)');
+await p.tap('.modules [data-tab="communities"]'); await sleep(1200);
+ok(await p.evaluate(() => document.querySelector('.mod-head h2')?.textContent === 'Comunidades'), 'Módulo Comunidades carga bajo demanda');
+await p.tap('.tabs [data-nav="calls"]'); await sleep(1500);
+ok(await p.evaluate(() => /Llamadas/.test(document.querySelector('.side-head h1')?.textContent || '')), 'Pestaña Llamadas (carga diferida)');
+await p.tap('.tabs [data-nav="ia"]'); await sleep(2000);
+ok(await p.evaluate(() => window.__duna.S.current === 'ia-duna' && document.getElementById('app').classList.contains('in-chat')), 'Pestaña IA abre IA DUNA');
+ok(await p.evaluate(() => !!document.querySelector('#ia-doc') && !!document.querySelector('#ia-photo')), 'IA DUNA: botones de documento y foto');
+// Visor integrado: un enlace en un mensaje se abre dentro de DUNA
+await p.evaluate(() => { const a = document.createElement('a'); a.href = 'https://es.wikipedia.org/wiki/R%C3%ADo_Putumayo'; a.id = 'tlink'; a.target = '_blank'; a.textContent = 'x'; document.querySelector('#msgs').append(a); });
+const before = popups; await p.tap('#tlink');
+await p.waitForSelector('.reader .rd-art', { timeout: 30000 }).catch(() => {});
+ok(await p.evaluate(() => (document.querySelector('.reader .rd-art')?.innerText || '').length > 500), 'Enlace abierto en el lector integrado');
+ok(popups === before && p.url().startsWith(BASE), 'No se abrió el navegador ni otra pestaña');
+await p.screenshot({ path: 'tests/out/ui-v3-lector.png' });
+await p.keyboard.press('Escape'); await sleep(400);
+ok(await p.evaluate(() => !document.querySelector('.reader')), 'El lector se cierra (Atrás/Escape)');
+await p.evaluate(() => { const a = document.createElement('a'); a.href = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'; a.id = 'vlink'; a.textContent = 'v'; document.querySelector('#msgs').append(a); });
+await p.tap('#vlink'); await sleep(800);
+ok(await p.evaluate(() => /youtube-nocookie\.com\/embed\/dQw4w9WgXcQ/.test(document.querySelector('.reader iframe')?.src || '')), 'Video de YouTube en reproductor integrado');
+await p.keyboard.press('Escape'); await sleep(300);
+// Redactor: el botón de IA ofrece mejorar el texto
+await p.evaluate(() => { history.back(); }); await sleep(800);
+const direct = await p.evaluate(() => [...window.__duna.S.chats.values()].find(c => c.type === 'direct')?.id);
+await p.evaluate(id => { location.hash = '#/c/' + id; }, direct); await sleep(2000);
+await p.tap('#msg-input'); await p.keyboard.type('ola como estas');
+await p.tap('.comp-box .ia-btn'); await sleep(400);
+ok(await p.evaluate(() => [...document.querySelectorAll('.menu button, [role=menu] button')].some(b => /Corregir/.test(b.innerText))), 'Redactor: menú IA con "Corregir ortografía"');
+await p.keyboard.press('Escape');
+ok(!errs.length, 'Sin errores de JavaScript ' + errs.join(' | '));
+await br.close(); console.log(fails ? fails + ' FALLO(S)' : 'TODO OK'); process.exit(fails ? 1 : 0);

@@ -10,3 +10,4 @@ signing.properties
 android/app/google-services.json
 ios/App/App/GoogleService-Info.plist
 *firebase-adminsdk*.json
+tools/.meta.json
