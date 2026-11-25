@@ -425,7 +425,7 @@ async function start() {
   setTimeout(() => { cleanupMine().catch(() => {}); cleanupOrphans(true).catch(() => {}); }, 8000);
   route();
   setTimeout(prefetchChats, 1200);
-  setTimeout(() => chatMod().catch(() => {}), 400); // el módulo de conversación queda listo apenas se pinta la lista
+  (window.requestIdleCallback || setTimeout)(() => chatMod().catch(() => {}), { timeout: 2500 }); // en reposo; al tocar una fila (pointerdown) se adelanta
   window.addEventListener('hashchange', route);
   window.addEventListener('popstate', () => { if (!location.hash.startsWith('#/c/') && S.current && innerWidth < 900) closeChat(true); });
   if (S._newRecoveryP) { const pr = S._newRecoveryP; delete S._newRecoveryP; pr.then(code => code && import('../features/auth/account.js').then(a => a.showRecoveryCode(code, true))); }
