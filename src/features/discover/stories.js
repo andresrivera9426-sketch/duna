@@ -67,7 +67,7 @@ function channelSearch() {
 }
 
 // ===== Crear estado =====
-function newStory() {
+export function newStory() {
   let s; let bg = 0;
   const text = h('textarea', { class: 'story-text', rows: 4, maxlength: 700, placeholder: 'Escribe un estado', style: { background: BG[0] } });
   const go = async (kind, file) => {
@@ -85,7 +85,7 @@ function newStory() {
         media.path = path; body = cap.value.trim() || null;
       }
       const { error } = await sb.from('stories').insert({ user_id: S.user.id, kind, body, style: kind === 'text' ? { bg: BG[bg] } : null, media }); if (error) throw error;
-      s.close(); toast('Estado publicado'); if (S.tab === 'updates') renderSide();
+      s.close(); toast('Estado publicado'); if (S.tab === 'updates' || S.tab === 'moments') renderSide();
     } catch (e) { toast('No se pudo publicar: ' + e.message); }
   };
   const cap = h('input', { placeholder: 'Comentario para la foto/video (opcional)', maxlength: 300 });
@@ -97,12 +97,12 @@ function newStory() {
 }
 
 // ===== Visor de estados =====
-async function viewStories(uid) {
+export async function viewStories(uid) {
   const arr = stories.filter(s => s.user_id === uid); if (!arr.length) return;
   let i = Math.max(0, arr.findIndex(s => !s._seen)); if (uid === S.user.id) i = 0;
   let timer, raf;
   const wrap = h('div', { class: 'story-viewer', role: 'dialog', 'aria-label': 'Estado' });
-  const close = () => { clearTimeout(timer); cancelAnimationFrame(raf); wrap.remove(); document.removeEventListener('keydown', key); if (S.tab === 'updates') renderSide(); };
+  const close = () => { clearTimeout(timer); cancelAnimationFrame(raf); wrap.remove(); document.removeEventListener('keydown', key); if (S.tab === 'updates' || S.tab === 'moments') renderSide(); };
   const key = e => { if (e.key === 'Escape') close(); if (e.key === 'ArrowRight') next(); if (e.key === 'ArrowLeft') prev(); };
   document.addEventListener('keydown', key);
   const next = () => { if (i < arr.length - 1) { i++; show(); } else close(); };

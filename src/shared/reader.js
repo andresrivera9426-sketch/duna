@@ -43,12 +43,14 @@ export function openContent(item) {
   const key = e => { if (e.key === 'Escape' && stack[stack.length - 1] === layer) { e.stopPropagation(); close(); } };
   document.addEventListener('keydown', key);
   const title = h('b', { class: 'rd-title' }, item.title || hostOf(item.url) || '');
-  const site = h('small', { class: 'rd-site' }, hostOf(item.url) || '');
-  const acts = h('div', { class: 'acts' }, item.url ? btn('copy', 'Copiar enlace', () => copyText(item.url)) : null);
+  const site = h('small', { class: 'rd-site' }, item.sub || hostOf(item.url) || '');
+  const share = () => import('./share.js').then(m => m.shareToChat((item.title ? item.title + '\n' : '') + item.url));
+  const acts = h('div', { class: 'acts' }, (item.actions || []).map(a => btn(a.icon, a.label, () => a.fn(ctx))),
+    item.url ? btn('share', 'Compartir en un chat', share) : null, item.url ? btn('copy', 'Copiar enlace', () => copyText(item.url)) : null);
   const body = h('div', { class: 'rd-body' });
   layer.append(h('header', { class: 'rd-head' }, btn('back', 'Volver', close), h('div', { class: 'rd-id' }, title, site), acts), body);
   document.body.append(layer); stack.push(layer);
-  const ctx = { layer, body, acts, close, setTitle: t => { title.textContent = t; } };
+  var ctx = { layer, body, acts, close, setTitle: t => { title.textContent = t; } };
   (VIEWERS[item.kind] || VIEWERS.page)(ctx, item);
   return ctx;
 }
@@ -77,18 +79,21 @@ registerViewer('page', async (ctx, item) => {
 // ---------- Video embebido ----------
 registerViewer('video', (ctx, item) => {
   const u = new URL(item.url); let src = null;
-  if (/vimeo\.com$/.test(u.hostname)) src = 'https://player.vimeo.com/video/' + u.pathname.split('/').filter(Boolean)[0];
+  if (/vimeo\.com$/.test(u.hostname)) { const id = u.pathname.split('/').filter(x => /^\d+$/.test(x)).pop(); if (id) src = 'https://player.vimeo.com/video/' + id + '?autoplay=1&playsinline=1&dnt=1'; }
   else { const id = ytId(item.url); if (id) src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&playsinline=1&rel=0`; }
   if (!src) return VIEWERS.page(ctx, { ...item, kind: 'page' });
+  dispatchEvent(new Event('duna:media'));
   ctx.layer.classList.add('rd-media');
   ctx.body.append(h('div', { class: 'rd-player' }, h('iframe', { src, allow: 'autoplay; encrypted-media; picture-in-picture; fullscreen', allowfullscreen: true, referrerpolicy: 'strict-origin-when-cross-origin', title: item.title || 'Video' })));
 });
-registerViewer('file-video', (ctx, item) => { ctx.layer.classList.add('rd-media'); ctx.body.append(h('div', { class: 'rd-player' }, h('video', { src: item.url, controls: true, autoplay: true, playsinline: true }))); });
+registerViewer('file-video', (ctx, item) => { dispatchEvent(new Event('duna:media')); ctx.layer.classList.add('rd-media'); ctx.body.append(h('div', { class: 'rd-player' }, h('video', { src: item.url, controls: true, autoplay: true, playsinline: true }))); });
 // ---------- Audio / radio ----------
 registerViewer('audio', (ctx, item) => {
   ctx.body.append(h('div', { class: 'rd-wrap rd-audio' }, h('div', { class: 'rd-disc' }, icon('headphones', 48)), h('h2', null, item.title || hostOf(item.url)),
     h('audio', { src: item.url, controls: true, autoplay: true, preload: 'none' })));
 });
+// ---------- Mini apps y juegos: la app pinta su propia interfaz dentro de la capa ----------
+registerViewer('app', (ctx, item) => { ctx.layer.classList.add('rd-app'); item.mount(ctx); });
 // ---------- Imagen ----------
 registerViewer('image', (ctx, item) => { ctx.layer.classList.add('rd-media'); ctx.body.append(h('div', { class: 'rd-img' }, h('img', { src: item.url, alt: item.title || '' }))); });
 // ---------- Mapa ----------

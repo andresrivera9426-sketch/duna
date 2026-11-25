@@ -41,6 +41,8 @@ async function access(sa: any) {
 }
 class Upstream extends Error { constructor(public status: number, msg: string) { super(msg); } }
 const SAFETY = ['HARM_CATEGORY_HARASSMENT', 'HARM_CATEGORY_HATE_SPEECH', 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'HARM_CATEGORY_DANGEROUS_CONTENT'].map(category => ({ category, threshold: 'BLOCK_MEDIUM_AND_ABOVE' }));
+// Resumir noticias y documentos: las noticias hablan de crímenes, accidentes o conflictos; solo se bloquea lo de riesgo alto
+const SAFETY_NEWS = SAFETY.map(x => ({ ...x, threshold: 'BLOCK_ONLY_HIGH' }));
 async function gen(model: string, body: any, ms: number) {
   const c = await config(); const sa = JSON.parse(c.fcm_sa || '{}');
   if (!sa.client_email) throw new Upstream(503, 'sin configuración');
@@ -73,6 +75,7 @@ function nowCO() {
 const PERSONA = () => `Eres IA DUNA, el asistente de inteligencia artificial de DUNA, una app de mensajería hecha en Colombia.
 Fecha y hora actual: ${nowCO()}. Úsala para todo lo relacionado con "hoy", "mañana", edades, plazos, etc.
 Identidad: te llamas IA DUNA. Si te preguntan quién eres, qué modelo usas, qué empresa te creó o si eres otro asistente, responde solo que eres IA DUNA, el asistente de DUNA, sin nombrar ni negar a otros asistentes, modelos o empresas de IA.
+Límites: no puedes crear alarmas, recordatorios ni tareas, ni enviar mensajes por la persona; si lo pide, dile que lo haga en la mini app «Notas y recordatorios» de DUNA (Descubrir → Mini apps) y ofrece redactar el texto. No prometas acciones que no puedes hacer.
 Estilo: español de Colombia, cálido, claro y al grano, como en un chat (tutea, salvo que la persona use "usted"). Respuestas cortas por defecto; más largas solo si te lo piden o el tema lo necesita.
 Formato de chat: *negrita*, _cursiva_, listas con • o números. No uses encabezados con #, tablas ni **dobles asteriscos**.
 Honestidad: no inventes datos. Para noticias, precios, clima, resultados deportivos, horarios o cualquier cosa que pueda haber cambiado, usa las herramientas de internet antes de responder y menciona brevemente de dónde sale el dato. Si no encuentras algo, dilo.
@@ -207,7 +210,11 @@ function brand(t: string) {
   const self = /(\b(soy|eres|me llamo|me crearon|me cre[oó]|me desarroll|me entren|fui (creado|desarrollado|entrenado)|modelo de lenguaje|I am|I'm|trained by|developed by|built by)\b)/i;
   const brands = /\b(Gemini|Bard|Google|DeepMind|OpenAI|ChatGPT|GPT-?\d|Anthropic|Claude|Meta AI|Llama)\b/i;
   t = t.split('\n').map(l => l.split(/(?<=[.!?])[ \t]+/).filter(x => !(self.test(x) && brands.test(x))).join(' ')).join('\n').replace(/\n{3,}/g, '\n\n').trim() || 'Soy IA DUNA, el asistente de DUNA.';
-  return t.replace(/\*\*([^*\n]+)\*\*/g, '*$1*').replace(/^#{1,6}\s+/gm, '');
+  return clean(t).replace(/\*\*([^*\n]+)\*\*/g, '*$1*').replace(/^#{1,6}\s+/gm, '');
+}
+// Quita restos técnicos que a veces se cuelan en la salida del modelo (p. ej. {"word_timestamps":true} en medio de una hora)
+function clean(t: string) {
+  return t.replace(/\{\s*["'„“”«]?[a-z_]{3,40}["'„“”»]?\s*:\s*(true|false|null|-?\d+(\.\d+)?|["'„“”][^{}"\n]{0,60}["'„“”])\s*\}/gi, '').replace(/<\/?(ctrl\d+|eos|bos|start_of_turn|end_of_turn)>/gi, '').replace(/[ \t]{2,}/g, ' ');
 }
 const textOf = (j: any) => (j?.candidates?.[0]?.content?.parts || []).filter((x: any) => !x.thought && x.text).map((x: any) => x.text).join('').trim();
 
@@ -279,6 +286,10 @@ Deno.serve(async (req) => {
   // Lector dentro de la app: trae el texto limpio de una página (sin modelo de IA, no gasta cupo de IA)
   if (mode === 'read') {
     const url = safeUrl(clip(b?.url, 2000)); if (!url) return json({ error: 'Enlace no permitido' }, 400);
+    // límite propio del lector (no gasta cupo de IA): 20 páginas/minuto y 300/día por persona
+    const { data: rl, error: re } = await sb.rpc('rl_take', { p_user: u.user.id, p_key: 'read', p_min: 20, p_day: 300 });
+    if (re) return json({ error: 'El lector no está disponible ahora' }, 503);
+    if (!rl?.ok) return json({ error: rl?.why === 'min' ? `Vas muy rápido. Intenta de nuevo en ${rl.retry || 60} s.` : 'Llegaste al límite diario del lector. Vuelve mañana.', limit: rl?.why }, 429);
     try {
       let raw = '';
       try { raw = await getText('https://r.jina.ai/' + url, 9000, { 'User-Agent': BOT_UA, 'X-Return-Format': 'markdown', 'X-Retain-Images': 'none', 'X-Remove-Selector': 'header, nav, footer, aside, form, [role=navigation], [role=banner], [role=contentinfo], .navbox, .mw-jump-link, #mw-navigation, #mw-panel, .vector-header-container, .vector-column-start, .mw-editsection, .reference, .noprint, .cookie, .advert, .ads' }); }
@@ -327,14 +338,14 @@ Deno.serve(async (req) => {
       if (mode === 'describe') { prompt = q ? `Sobre la imagen adjunta: ${q}` : 'Describe la imagen adjunta en 2-4 frases. Si tiene texto, transcríbelo. Si es un documento o recibo, resume los datos clave.'; max = 1000; }
       if (mode === 'transcribe') { sys = 'Eres un transcriptor. Devuelve solo la transcripción literal del audio, con puntuación. Si no se entiende nada, responde exactamente: (no se entiende)'; prompt = 'Transcribe esta nota de voz.'; temp = 0; max = 2000; }
       const gc: any = { maxOutputTokens: max, temperature: temp }; if (schema) { gc.responseMimeType = 'application/json'; gc.responseSchema = schema; }
-      const { j } = await genFallback(QUICK, { systemInstruction: { parts: [{ text: sys }] }, contents: [{ role: 'user', parts: [...(['describe', 'transcribe', 'doc'].includes(mode) ? media : []), { text: prompt }] }], generationConfig: gc, safetySettings: SAFETY });
-      const text = textOf(j); if (!text) throw new Upstream(422, j?.promptFeedback?.blockReason || j?.candidates?.[0]?.finishReason === 'SAFETY' ? 'safety' : 'empty');
+      const { j } = await genFallback(QUICK, { systemInstruction: { parts: [{ text: sys }] }, contents: [{ role: 'user', parts: [...(['describe', 'transcribe', 'doc'].includes(mode) ? media : []), { text: prompt }] }], generationConfig: gc, safetySettings: ['article', 'doc'].includes(mode) ? SAFETY_NEWS : SAFETY });
+      const text = textOf(j); if (!text) console.error('ia vacío', mode, j?.promptFeedback?.blockReason || '', j?.candidates?.[0]?.finishReason || ''); if (!text) throw new Upstream(422, j?.promptFeedback?.blockReason || j?.candidates?.[0]?.finishReason === 'SAFETY' ? 'safety' : 'empty');
       if (mode === 'suggest') {
         let arr: string[] = []; try { arr = JSON.parse(text).replies; } catch { arr = text.split('\n'); }
         arr = (arr || []).map(s => brand(String(s)).replace(/^[\s•\-\d.)"]+|"$/g, '').trim()).filter(Boolean).slice(0, 3);
         return json({ replies: arr, left: lim.left });
       }
-      r = { text: ['translate', 'rewrite', 'transcribe'].includes(mode) ? text : brand(text) };
+      r = { text: ['translate', 'rewrite', 'transcribe'].includes(mode) ? clean(text) : brand(text) };
     }
     return json({ text: r.text, sources: r.sources || [], image: r.image || null, left: lim.left });
   } catch (e) {

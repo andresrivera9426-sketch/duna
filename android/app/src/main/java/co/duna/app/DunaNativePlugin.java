@@ -45,6 +45,13 @@ public class DunaNativePlugin extends Plugin {
         pendingShare = s;
         if (inst != null) inst.notifyListeners("share", new JSObject(), true);
     }
+    static void emitMediaStop() { if (inst != null) inst.notifyListeners("mediaStop", new JSObject(), false); }
+    /** DUNA Radio: mantiene la app viva en segundo plano mientras suena (servicio en primer plano mediaPlayback). */
+    @PluginMethod public void mediaStart(PluginCall call) {
+        try { MediaService.start(getContext(), call.getString("title", "DUNA Radio"), call.getString("sub", "En vivo")); call.resolve(); }
+        catch (Exception e) { call.reject("No se pudo iniciar la radio en segundo plano"); }
+    }
+    @PluginMethod public void mediaStop(PluginCall call) { MediaService.stop(getContext()); call.resolve(); }
     static void emitToken(String token) {
         if (inst != null) { JSObject o = new JSObject(); o.put("token", token); inst.notifyListeners("fcmToken", o, true); }
     }

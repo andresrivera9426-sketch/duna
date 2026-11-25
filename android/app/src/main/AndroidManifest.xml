@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
     <queries>
         <package android:name="com.miui.securitycenter" />
         <package android:name="com.huawei.systemmanager" />
@@ -61,6 +60,7 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+        <service android:name=".MediaService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
         <service android:name=".PushService" android:exported="false" android:foregroundServiceType="remoteMessaging" />
         <service android:name=".DunaFcmService" android:exported="false">
             <intent-filter>
@@ -75,9 +75,18 @@
         </receiver>
         <receiver android:name=".ReplyReceiver" android:exported="false" />
         <receiver android:name=".DismissReceiver" android:exported="false" />
-        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_stat_duna" />
-        <meta-data android:name="com.google.firebase.messaging.default_notification_color" android:resource="@color/duna_brand" />
-        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="duna_msgs" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_duna"
+        />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/duna_brand"
+        />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="duna_msgs"
+        />
     </application>
 
     <!-- Permissions -->
@@ -99,6 +108,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />

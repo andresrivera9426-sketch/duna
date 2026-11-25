@@ -50,7 +50,7 @@ export async function openChat(id, fromRoute = false) {
     if (vo.length) { const { data } = await sb.from('view_once_opens').select('message_id').in('message_id', vo); (data || []).forEach(x => S.vo.add(x.message_id)); }
   };
   const warm = S.msgs.has(id) && S.msgs.get(id).length > 0 && S.extrasAt?.get(id);
-  const work = Promise.all([loadMessages(id), loadChatExtras(id).then(() => (S.extrasAt ||= new Map()).set(id, Date.now()))]).then(loadVo);
+  const work = (S.warmP?.get(id) || Promise.all([loadMessages(id), loadChatExtras(id).then(() => (S.extrasAt ||= new Map()).set(id, Date.now()))])).then(loadVo);
   if (S.stars.size === 0) loadStars();
   if (warm) {
     work.then(() => { if (S.current === id) { renderMsgs(); renderPinbar(); } }).catch(() => {});

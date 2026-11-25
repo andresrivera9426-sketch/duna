@@ -7,8 +7,8 @@ android {
         applicationId "co.duna.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 8
-        versionName "1.0.7"
+        versionCode 9
+        versionName "1.0.8"
         // FCM se activa solo si existe google-services.json (proyecto Firebase de DUNA)
         buildConfigField "boolean", "HAS_FCM", file('google-services.json').exists() ? "true" : "false"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"

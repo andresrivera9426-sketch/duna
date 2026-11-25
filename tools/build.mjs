@@ -1,4 +1,4 @@
-import { build } from 'esbuild';
+import { build, transform } from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
 const V = process.env.DUNA_V || new Date().toISOString().replace(/\D/g, '').slice(0, 12);
@@ -6,13 +6,15 @@ const out = 'docs';
 fs.mkdirSync(out + '/icons', { recursive: true });
 fs.rmSync(out + '/c', { recursive: true, force: true });
 // Code splitting: app.js solo trae lo necesario para arrancar; secciones y mini-apps van en docs/c/*.js (con hash, caché larga)
-const r = await build({ entryPoints: { app: 'src/app/main.js' }, bundle: true, minify: true, format: 'esm', target: ['es2020'], splitting: true, outdir: out, chunkNames: 'c/[name]-[hash]', legalComments: 'none', metafile: true });
+const r = await build({ entryPoints: { app: 'src/app/main.js' }, bundle: true, minify: true, format: 'esm', target: ['es2020'], splitting: true, outdir: out, chunkNames: 'c/[name]-[hash]', legalComments: 'none', metafile: true, define: { __DUNA_V__: JSON.stringify(V) } });
 fs.writeFileSync('tools/.meta.json', JSON.stringify(r.metafile));
 // Trozos que se cargan al arrancar: se precargan (modulepreload) y el service worker los guarda de una vez
 const om = r.metafile.outputs, ini = new Set(); const walk = f => { if (ini.has(f)) return; ini.add(f); for (const i of om[f].imports || []) if (i.kind === 'import-statement') walk(i.path); }; walk(out + '/app.js');
 const initial = [...ini].filter(f => f !== out + '/app.js').map(f => path.relative(out, f));
 const all = Object.keys(om).filter(f => f.endsWith('.js') && f !== out + '/app.js').map(f => path.relative(out, f));
-for (const f of ['index.html', 'manifest.webmanifest', 'sw.js', 'styles.css']) fs.writeFileSync(path.join(out, f), fs.readFileSync('web/' + f, 'utf8').replaceAll('__V__', V)
+// CSS minificado: styles.css (arranque) y discover.css (solo al abrir Descubrir)
+for (const f of ['styles.css', 'discover.css']) fs.writeFileSync(path.join(out, f), (await transform(fs.readFileSync('web/' + f, 'utf8').replaceAll('__V__', V), { loader: 'css', minify: true, target: ['chrome100', 'safari15'] })).code);
+for (const f of ['index.html', 'manifest.webmanifest', 'sw.js']) fs.writeFileSync(path.join(out, f), fs.readFileSync('web/' + f, 'utf8').replaceAll('__V__', V)
   .replace('__PRELOAD__', initial.map(c => `<link rel="modulepreload" href="${c}">`).join('\n')).replace('__CHUNKS__', JSON.stringify(all)));
 for (const f of fs.readdirSync('web/icons')) fs.copyFileSync('web/icons/' + f, out + '/icons/' + f);
 fs.mkdirSync(out + '/fonts', { recursive: true });

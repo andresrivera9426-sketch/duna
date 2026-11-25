@@ -36,10 +36,18 @@ registerNav({ id: 'discover', icon: 'compass', label: 'Descubrir', order: 20, go
 registerNav({ id: 'calls', icon: 'call', label: 'Llamadas', order: 30 });
 registerNav({ id: 'ia', icon: 'sparkle', label: 'IA', order: 40, go: () => { if (S.tab !== 'chats') setTab('chats'); openIA(); } });
 registerNav({ id: 'me', icon: 'user', label: 'Perfil', order: 50, go: () => openSettings('profile') });
-registerModule({ id: 'updates', label: 'Novedades', icon: 'status', order: 10, render: renderUpdates });
-registerModule({ id: 'communities', label: 'Comunidades', icon: 'community', order: 20, render: renderCommunities });
-for (const [i, [id, label, ic]] of [['news', 'Noticias', 'channel'], ['videos', 'Videos', 'video'], ['radio', 'Radio', 'headphones'], ['games', 'Juegos', 'star'], ['apps', 'Mini apps', 'bolt']].entries())
-  registerModule({ id, label, icon: ic, order: 100 + i, soon: true });
+// Descubrir (super-app): cada módulo se descarga solo al abrirlo (code splitting); aquí solo queda su ficha
+const M = { news: () => import('../features/news/news.js'), videos: () => import('../features/videos/videos.js'), radio: () => import('../features/radio/radio.js'),
+  apps: () => import('../features/miniapps/registry.js'), games: () => import('../features/games/games.js'), moments: () => import('../features/moments/moments.js') };
+registerModule({ id: 'moments', label: 'Momentos', icon: 'image', order: 5, render: lazy(M.moments, 'renderMoments') });
+registerModule({ id: 'updates', label: 'Estados', icon: 'status', order: 10, render: renderUpdates });
+registerModule({ id: 'news', label: 'Noticias', icon: 'news', order: 20, render: lazy(M.news, 'renderNews') });
+registerModule({ id: 'videos', label: 'Videos', icon: 'video', order: 30, render: lazy(M.videos, 'renderVideos') });
+registerModule({ id: 'radio', label: 'Radio', icon: 'headphones', order: 40, render: lazy(M.radio, 'renderRadio') });
+registerModule({ id: 'apps', label: 'Mini apps', icon: 'grid', order: 50, render: lazy(M.apps, 'renderApps') });
+registerModule({ id: 'games', label: 'Juegos', icon: 'game', order: 60, render: lazy(M.games, 'renderGames') });
+registerModule({ id: 'communities', label: 'Comunidades', icon: 'community', order: 70, render: renderCommunities });
+registerModule({ id: 'pay', label: 'DUNA Pay', icon: 'wallet', order: 90, soon: true });
 
 function renderShell() {
   document.body.innerHTML = '';
@@ -96,6 +104,8 @@ function renderDiscover(side, mod) {
 }
 function renderChatsSide(side) {
   const listEl = h('div', { class: 'list', id: 'chat-list', role: 'list' });
+  // Al tocar una fila (antes del clic) ya se piden el módulo de chat y sus mensajes: se gana el tiempo del gesto
+  listEl.addEventListener('pointerdown', warmChat, { passive: true });
   const search = h('input', { type: 'search', placeholder: 'Buscar chats o mensajes', value: query, 'aria-label': 'Buscar', oninput: debounce(e => { query = e.target.value; renderList(listEl); }, 120) });
   side.append(
     sideHeader('DUNA', [
@@ -119,6 +129,13 @@ function renderChatsSide(side) {
     listEl,
     h('button', { class: 'fab', id: 'fab-new', title: 'Nuevo chat', 'aria-label': 'Nuevo chat', onclick: () => newChatSheet() }, icon('plus', 26)));
   renderList(listEl);
+}
+function warmChat(e) {
+  const id = e.target.closest?.('.chat-row')?.dataset.chat; if (!id || id === IA_ID) return;
+  chatMod().catch(() => {});
+  if (S.msgs.has(id) && S.extrasAt?.get(id)) return;
+  (S.warmP ||= new Map()); if (S.warmP.has(id)) return;
+  S.warmP.set(id, Promise.all([loadMessages(id), loadChatExtras(id).then(() => (S.extrasAt ||= new Map()).set(id, Date.now()))]).finally(() => setTimeout(() => S.warmP.delete(id), 3000)));
 }
 function greet() { const hr = new Date().getHours(); return hr < 12 ? 'Buenos días' : hr < 19 ? 'Buenas tardes' : 'Buenas noches'; }
 function filterCount(k) {
@@ -408,7 +425,7 @@ async function start() {
   setTimeout(() => { cleanupMine().catch(() => {}); cleanupOrphans(true).catch(() => {}); }, 8000);
   route();
   setTimeout(prefetchChats, 1200);
-  (window.requestIdleCallback || setTimeout)(() => chatMod().catch(() => {}), { timeout: 2500 });
+  setTimeout(() => chatMod().catch(() => {}), 400); // el módulo de conversación queda listo apenas se pinta la lista
   window.addEventListener('hashchange', route);
   window.addEventListener('popstate', () => { if (!location.hash.startsWith('#/c/') && S.current && innerWidth < 900) closeChat(true); });
   if (S._newRecoveryP) { const pr = S._newRecoveryP; delete S._newRecoveryP; pr.then(code => code && import('../features/auth/account.js').then(a => a.showRecoveryCode(code, true))); }
